@@ -54,6 +54,7 @@ enum PlaybackMode: String, CaseIterable {
   var cached: ((Song, URL) -> Void)?
   private let player = AVPlayer()
   private var generation = UUID(), wantsAudio = false, interrupted = false, finished = false
+  private var lyricTask: Task<Void, Never>?
   private var source: URL?, artwork: MPMediaItemArtwork?
   private var loadTask: Task<Void, Never>?, artworkTask: Task<Void, Never>?,
     sleepTask: Task<Void, Never>?
@@ -150,6 +151,7 @@ enum PlaybackMode: String, CaseIterable {
   }
   deinit {
     loadTask?.cancel()
+    lyricTask?.cancel()
     artworkTask?.cancel()
     sleepTask?.cancel()
     transfers.values.forEach { $0.cancel() }
@@ -165,6 +167,7 @@ enum PlaybackMode: String, CaseIterable {
     let token = UUID()
     generation = token
     loadTask?.cancel()
+    lyricTask?.cancel()
     artworkTask?.cancel()
     status = nil
     player.pause()
@@ -207,6 +210,11 @@ enum PlaybackMode: String, CaseIterable {
           url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: self.preciseSeeking])
         let item = AVPlayerItem(asset: asset)
         self.player.replaceCurrentItem(with: item)
+        self.lyricTask = Task { @MainActor [weak self] in
+          await SourceCatalog.applyLyrics(for: song, isCurrent: {
+            self?.generation == token && self?.current?.id == song.id && self?.current?.platform == song.platform
+          }, apply: { self?.current?.lyrics = $0 })
+        }
         self.status = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
           Task { @MainActor in
             guard let self, self.generation == token else { return }
@@ -320,6 +328,7 @@ enum PlaybackMode: String, CaseIterable {
   func clear() {
     generation = UUID()
     loadTask?.cancel()
+    lyricTask?.cancel()
     artworkTask?.cancel()
     status = nil
     current = nil

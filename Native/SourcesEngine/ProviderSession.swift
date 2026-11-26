@@ -50,25 +50,38 @@ struct SourceFailure: LocalizedError {
         }
     }
 
-    func load(_ item: SourceScript) async throws {
+    func load(_ item: SourceScript) async throws -> [String: String]? {
         var info = item.metadata
         info["script"] = item.executable
         info["id"] = item.id
         info["name"] = item.name
         let response = try await wait("init", seconds: 10) { generation = runtime.loadScript(info) }
         capabilities = (response["info"] as? SourceJSON)?["sources"] as? [String: SourceJSON] ?? [:]
+        return (response["info"] as? SourceJSON)?["cyMetadata"] as? [String: String]
     }
 
-    func resolve(_ song: Song) async throws -> URL {
+    func resolve(_ song: Song, quality: SourceEngine.Quality) async throws -> URL {
         let source = song.platform == "QQ" ? "tx" : song.platform ?? "tx"
         guard let capability = capabilities[source], (capability["actions"] as? [String])?.contains("musicUrl") == true else {
             throw SourceFailure("当前音源不支持此平台")
         }
-        let qualities = capability["qualitys"] as? [String] ?? []
+        let supported = capability["qualitys"] as? [String] ?? []
+        let order: [SourceEngine.Quality] = [.lossless, .standard, .low]
+        var lastError: Error = SourceFailure("当前音源不支持所选音质")
+        for option in order.drop(while: { $0 != quality }) where supported.contains(option.rawValue) {
+            try Task.checkCancellation()
+            do { return try await requestURL(song, source: source, quality: option.rawValue) }
+            catch is CancellationError { throw CancellationError() }
+            catch { lastError = error }
+        }
+        throw lastError
+    }
+
+    private func requestURL(_ song: Song, source: String, quality: String) async throws -> URL {
         let key = UUID().uuidString
         let music = ["id": song.id, "songmid": song.id, "hash": song.id, "title": song.title, "name": song.title,
                     "artist": song.artist, "singer": song.artist, "source": source]
-        let info: SourceJSON = ["musicInfo": music, "type": qualities.contains("128k") ? "128k" : qualities.first ?? "128k",
+        let info: SourceJSON = ["musicInfo": music, "type": quality,
                                 "requestContext": ["requestKey": key, "requestType": "current"]]
         let response = try await wait(key, seconds: 20) {
             send("request", ["requestKey": key, "data": ["action": "musicUrl", "source": source, "info": info]])

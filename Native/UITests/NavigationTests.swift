@@ -2,7 +2,7 @@ import XCTest
 
 final class NavigationTests: XCTestCase {
     func testNativeTabNavigation() throws {
-        let app = XCUIApplication(); app.launch()
+        let app = XCUIApplication(); app.launchArguments += ["-AppleLanguages", "(zh-Hans)", "-app.language", "zh-Hans"]; app.launch()
         let settings = app.tabBars.buttons["设置"]
         XCTAssertTrue(settings.waitForExistence(timeout: 10)); settings.tap()
         let sources = app.buttons["自定义音源"]

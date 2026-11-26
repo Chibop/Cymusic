@@ -12,6 +12,7 @@ final class Library: ObservableObject {
 
     private struct Store: Codable {
         var version = 1
+        var legacyMMKVImported: Bool?
         var songs: [Song] = []
         var favoriteIDs: [String] = []
         var playlists: [Playlist] = []
@@ -38,6 +39,49 @@ final class Library: ObservableObject {
         } catch {
             loadFailure = "Could not load the library. The saved file has been preserved. \(error.localizedDescription)"
             message = loadFailure
+        }
+        migrateLegacyLibrary()
+    }
+
+    private func migrateLegacyLibrary() {
+        guard loadFailure == nil, store.legacyMMKVImported != true else { return }
+        do {
+            guard let legacy = try LegacyMigration.library(documents: documents) else { return }
+            var next = store
+            var existing = Dictionary(next.songs.enumerated().map { ($0.element.id, $0.offset) }, uniquingKeysWith: { first, _ in first })
+            var aliases: [String: String] = [:]
+            for song in legacy.songs {
+                let path = legacy.paths[song.id]
+                // Upgrade the older filename-only recovery entry in place so
+                // existing native memberships still point at the same track.
+                if existing[song.id] == nil, let path, let i = existing["legacy:" + path] {
+                    var upgraded = song
+                    upgraded.id = next.songs[i].id
+                    next.songs[i] = upgraded
+                    aliases[song.id] = upgraded.id
+                } else if let i = existing[song.id] {
+                    guard next.songs[i].platform == song.platform else { throw CocoaError(.fileReadCorruptFile) }
+                } else {
+                    existing[song.id] = next.songs.count
+                    next.songs.append(song)
+                }
+                let id = aliases[song.id] ?? song.id
+                if next.documentsPaths[id] == nil { next.documentsPaths[id] = path }
+            }
+            var favorites = Set(next.favoriteIDs)
+            for key in legacy.favoriteIDs {
+                let id = aliases[key] ?? key
+                if favorites.insert(id).inserted { next.favoriteIDs.append(id) }
+            }
+            for var list in legacy.playlists {
+                var seen = Set<String>()
+                list.songIDs = list.songIDs.map { aliases[$0] ?? $0 }.filter { seen.insert($0).inserted }
+                next.playlists.append(list)
+            }
+            next.legacyMMKVImported = true
+            save(next)
+        } catch {
+            message = "Legacy library import could not finish. It will retry on next launch. \(error.localizedDescription)"
         }
     }
 
@@ -153,14 +197,18 @@ final class Library: ObservableObject {
     // The RN store kept metadata in MMKV but its audio files need no decoder.
     private func recoverLegacyFiles() {
         var next = Store()
-        for folder in ["importedLocalMusic", "download/music", "musicCache"] {
-            let root = documents.appendingPathComponent(folder)
+        let base = documents.resolvingSymlinksInPath()
+        for folder in LegacyMigration.audioFolders {
+            let root = base.appendingPathComponent(folder)
+            guard root.resolvingSymlinksInPath().path == root.path else { continue }
             let fm = FileManager.default
             guard fm.fileExists(atPath: root.path), let entries = fm.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) else { continue }
             for case let url as URL in entries {
                 guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
                       UTType(filenameExtension: url.pathExtension)?.conforms(to: .audio) == true else { continue }
-                let path = folder + "/" + String(url.path.dropFirst(root.path.count + 1))
+                let absolute = url.resolvingSymlinksInPath().path
+                guard absolute.hasPrefix(root.path + "/") else { continue }
+                let path = String(absolute.dropFirst(base.path.count + 1))
                 let song = Song(id: "legacy:" + path, title: url.deletingPathExtension().lastPathComponent, artist: "Unknown Artist", platform: "local")
                 next.songs.append(song)
                 next.documentsPaths[song.id] = path

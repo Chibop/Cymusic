@@ -316,6 +316,7 @@ globalThis.lx_setup = (key, id, name, description, version, author, homepage, ra
     // }
     const sourceInfo = {
       sources: {},
+      cyMetadata: info.cyMetadata,
     }
     try {
       for (const source of allSources) {

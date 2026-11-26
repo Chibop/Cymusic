@@ -1,0 +1,39 @@
+name: Native iPhone build
+on:
+  workflow_dispatch:
+  push:
+    branches: [refactor/swiftui-native]
+    paths: ['Native/**', '.github/workflows/native-ios.yml']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select installed Xcode with iOS 26.1 or newer
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, subprocess, os
+          apps=[]
+          for p in Path('/Applications').glob('Xcode*.app'):
+              d=str(p/'Contents/Developer')
+              r=subprocess.run(['xcrun','--sdk','iphoneos','--show-sdk-version'],env={**os.environ,'DEVELOPER_DIR':d},capture_output=True,text=True)
+              if r.returncode: continue
+              v=tuple(map(int,re.findall(r'\d+',r.stdout)))
+              if v >= (26,1): apps.append((v,d))
+          assert apps, 'Missing iOS SDK >= 26.1'
+          with open(os.environ['GITHUB_ENV'],'a') as f: print('DEVELOPER_DIR='+max(apps)[1],file=f)
+          PY
+      - name: Verify source runtime
+        run: bash Native/SourcesEngine/verify-engine.sh
+      - name: Build unsigned IPA
+        run: TMPDIR="$RUNNER_TEMP/" bash Native/package.sh "$RUNNER_TEMP/ipa"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CyMusic-native-unsigned-ipa
+          path: ${{ runner.temp }}/ipa/*.ipa
+          if-no-files-found: error

@@ -6,7 +6,7 @@ out="${1:-$HOME/Downloads/CyMusic-Native}"
 mkdir -p "$out"
 build=$(mktemp -d "${TMPDIR%/}/cymusic-build.XXXXXX")
 trap 'rm -rf "$build"' EXIT
-xcodebuild -project CyMusicNative.xcodeproj -scheme CyMusic -configuration Release -destination generic/platform=iOS -derivedDataPath "$build/Derived" CODE_SIGNING_ALLOWED=NO build
+xcodebuild -project CyMusicNative.xcodeproj -scheme CyMusic -configuration Release -destination generic/platform=iOS -packageCachePath "$build/PackageCache" -derivedDataPath "$build/Derived" CODE_SIGNING_ALLOWED=NO build
 mkdir "$build/Payload"
 cp -R "$build/Derived/Build/Products/Release-iphoneos/CyMusic.app" "$build/Payload/"
 app="$build/Payload/CyMusic.app"

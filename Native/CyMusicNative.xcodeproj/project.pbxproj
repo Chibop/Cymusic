@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		05E46E5BC35AB9BEC9A32C5F /* PlayerScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CB5E862940289CF142A58E3 /* PlayerScreen.swift */; };
+		1286AB1E87F3804035E75BF0 /* MMKV in Frameworks */ = {isa = PBXBuildFile; productRef = 5006D966925C4B7FA74443FB /* MMKV */; };
 		2F7E5BDA39BE8B774948888C /* CyMusicShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F5A6C410181D5358EF749B60 /* CyMusicShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		3D2972C88CF63CC10767344D /* Catalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21BCD60D60272E20F16D0789 /* Catalog.swift */; };
 		3D56442D838445837BFA7F56 /* Playback.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67B3D9AC8610D0720F0E0210 /* Playback.swift */; };
@@ -21,9 +22,12 @@
 		99ACB778E89CB161A1D83CEB /* SharedSourceReceiver.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD34FB76DD2F620CAE09EEA9 /* SharedSourceReceiver.swift */; };
 		A095823BBC0C613B2D01882C /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B437B91F473C55AB2AC8E505 /* ShareViewController.swift */; };
 		AC56CACDC275050176326F8D /* SourceScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C8BEEE88E58A3059EA33C07 /* SourceScreens.swift */; };
+		AE3F487767DE6E6DAC561D6D /* LegacyMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 127CD6D3784818507527AB96 /* LegacyMigration.swift */; };
 		B6CEE390DD754F437891A1B4 /* PlaybackMedia.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82C491E5D131CC4F8D3577C2 /* PlaybackMedia.swift */; };
+		BFBB44AB1528A6CA6F6B790A /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 4920379E5DC7D7CA2895B614 /* Localizable.strings */; };
 		D8F165E9C26EAB9D6D0E5238 /* user-api-preload.js in Resources */ = {isa = PBXBuildFile; fileRef = 5E5EC19FD8A1E2B67F336C60 /* user-api-preload.js */; };
 		DDB2DBF24D113133E3846A68 /* Song.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03FD87B1E7CDB6B6253F63D7 /* Song.swift */; };
+		E68240496C36ED6B125BB747 /* LanguageSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 577C1EF69144019212BF1E51 /* LanguageSettings.swift */; };
 		F2781676E359DC74013FABFF /* SourceEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2101E01BAEA5D1CAC9ABFD44 /* SourceEngine.swift */; };
 		F472C21DC1B3D1B23E97ABF6 /* CyMusicApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 364291DFBED8A1FCD1C3F493 /* CyMusicApp.swift */; };
 		F59D0D1985E28FF418421D86 /* ProviderSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 727EC6D8C37057E239971293 /* ProviderSession.swift */; };
@@ -65,18 +69,23 @@
 		03FD87B1E7CDB6B6253F63D7 /* Song.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Song.swift; sourceTree = "<group>"; };
 		04A05074FE7B9C9AAF268768 /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		04F47E3A9A3D9266680AA9C0 /* CyMusicUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = CyMusicUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		0BA217FE9B9E344129A3F7D8 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
+		127CD6D3784818507527AB96 /* LegacyMigration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyMigration.swift; sourceTree = "<group>"; };
 		2101E01BAEA5D1CAC9ABFD44 /* SourceEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceEngine.swift; sourceTree = "<group>"; };
 		21BCD60D60272E20F16D0789 /* Catalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Catalog.swift; sourceTree = "<group>"; };
 		2C8BEEE88E58A3059EA33C07 /* SourceScreens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceScreens.swift; sourceTree = "<group>"; };
 		313376DB645DA323DC9FF7ED /* CyMusic.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = CyMusic.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		364291DFBED8A1FCD1C3F493 /* CyMusicApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CyMusicApp.swift; sourceTree = "<group>"; };
+		577C1EF69144019212BF1E51 /* LanguageSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanguageSettings.swift; sourceTree = "<group>"; };
 		5E5EC19FD8A1E2B67F336C60 /* user-api-preload.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "user-api-preload.js"; sourceTree = "<group>"; };
 		659E3197CF737B8E13EA6D61 /* CyMusicUserApiRuntime.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = CyMusicUserApiRuntime.m; sourceTree = "<group>"; };
 		67B3D9AC8610D0720F0E0210 /* Playback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Playback.swift; sourceTree = "<group>"; };
 		727EC6D8C37057E239971293 /* ProviderSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderSession.swift; sourceTree = "<group>"; };
 		82C491E5D131CC4F8D3577C2 /* PlaybackMedia.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackMedia.swift; sourceTree = "<group>"; };
 		8B7B2538BB639B548164CA0B /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Images.xcassets; sourceTree = "<group>"; };
+		9829C7EE0CC7929CE948057E /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		9CB5E862940289CF142A58E3 /* PlayerScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerScreen.swift; sourceTree = "<group>"; };
+		A2532A5DE75D08295B08AD60 /* MMKV */ = {isa = PBXFileReference; lastKnownFileType = folder; name = MMKV; path = Vendor/MMKV; sourceTree = SOURCE_ROOT; };
 		B437B91F473C55AB2AC8E505 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		CD34FB76DD2F620CAE09EEA9 /* SharedSourceReceiver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedSourceReceiver.swift; sourceTree = "<group>"; };
 		DDF6D4C63A19FD0A400F2584 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
@@ -91,6 +100,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1286AB1E87F3804035E75BF0 /* MMKV in Frameworks */,
 				6E7D8B3AE9C66EA610DB394A /* JavaScriptCore.framework in Frameworks */,
 				91C67E4218010918AD6931A6 /* Security.framework in Frameworks */,
 			);
@@ -137,6 +147,8 @@
 				1BB32DC6D87DC0837B17368A /* Extension */,
 				0F0712B772BC71278669B1B8 /* Host */,
 				7F7C78D2F128FF2E902D6E85 /* Library */,
+				FAFAF2314E80FD595A2E09F9 /* Localization */,
+				847517D134A15C6CD5BB9707 /* Packages */,
 				FC2654B0442866FF59029814 /* Playback */,
 				2C4C08FE95DFFD8DFA097C00 /* SourcesEngine */,
 				ABD0432FB2B1A02D5BAB6013 /* UITests */,
@@ -177,10 +189,19 @@
 		7F7C78D2F128FF2E902D6E85 /* Library */ = {
 			isa = PBXGroup;
 			children = (
+				127CD6D3784818507527AB96 /* LegacyMigration.swift */,
 				DEB5C4FA9DAC6661427C7DEB /* Library.swift */,
 				DFEFE2F023E902DF4ABB94B3 /* LibraryScreen.swift */,
 			);
 			path = Library;
+			sourceTree = "<group>";
+		};
+		847517D134A15C6CD5BB9707 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				A2532A5DE75D08295B08AD60 /* MMKV */,
+			);
+			name = Packages;
 			sourceTree = "<group>";
 		};
 		ABD0432FB2B1A02D5BAB6013 /* UITests */ = {
@@ -195,6 +216,7 @@
 			isa = PBXGroup;
 			children = (
 				364291DFBED8A1FCD1C3F493 /* CyMusicApp.swift */,
+				577C1EF69144019212BF1E51 /* LanguageSettings.swift */,
 				03FD87B1E7CDB6B6253F63D7 /* Song.swift */,
 			);
 			path = App;
@@ -207,6 +229,14 @@
 				DDF6D4C63A19FD0A400F2584 /* Security.framework */,
 			);
 			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		FAFAF2314E80FD595A2E09F9 /* Localization */ = {
+			isa = PBXGroup;
+			children = (
+				4920379E5DC7D7CA2895B614 /* Localizable.strings */,
+			);
+			path = Localization;
 			sourceTree = "<group>";
 		};
 		FC2654B0442866FF59029814 /* Playback */ = {
@@ -273,6 +303,7 @@
 			);
 			name = CyMusic;
 			packageProductDependencies = (
+				5006D966925C4B7FA74443FB /* MMKV */,
 			);
 			productName = CyMusic;
 			productReference = 313376DB645DA323DC9FF7ED /* CyMusic.app */;
@@ -305,9 +336,13 @@
 			knownRegions = (
 				Base,
 				en,
+				"zh-Hans",
 			);
 			mainGroup = 333C792CFD528F3BA81B630D;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				1D4121EDB7B544A638E13AA3 /* XCLocalSwiftPackageReference "Vendor/MMKV" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 43E235F3EEF78A8F14DCE8F7 /* Products */;
 			projectDirPath = "";
@@ -326,6 +361,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				4F1465796911F879633B77EA /* Images.xcassets in Resources */,
+				BFBB44AB1528A6CA6F6B790A /* Localizable.strings in Resources */,
 				D8F165E9C26EAB9D6D0E5238 /* user-api-preload.js in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -340,6 +376,8 @@
 				3D2972C88CF63CC10767344D /* Catalog.swift in Sources */,
 				F472C21DC1B3D1B23E97ABF6 /* CyMusicApp.swift in Sources */,
 				62B5B5B408C7F2A7945BEB57 /* CyMusicUserApiRuntime.m in Sources */,
+				E68240496C36ED6B125BB747 /* LanguageSettings.swift in Sources */,
+				AE3F487767DE6E6DAC561D6D /* LegacyMigration.swift in Sources */,
 				763199D6BFEEC9EE915408EE /* Library.swift in Sources */,
 				933ED63D17BADB0ED441F0BD /* LibraryScreen.swift in Sources */,
 				3D56442D838445837BFA7F56 /* Playback.swift in Sources */,
@@ -383,6 +421,18 @@
 			targetProxy = BE5F1DCA0D150FC68E3216AC /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
+
+/* Begin PBXVariantGroup section */
+		4920379E5DC7D7CA2895B614 /* Localizable.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				0BA217FE9B9E344129A3F7D8 /* en */,
+				9829C7EE0CC7929CE948057E /* zh-Hans */,
+			);
+			name = Localizable.strings;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
 		02C61A3AEA7C472D616F5390 /* Debug */ = {
@@ -656,6 +706,20 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		1D4121EDB7B544A638E13AA3 /* XCLocalSwiftPackageReference "Vendor/MMKV" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Vendor/MMKV;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		5006D966925C4B7FA74443FB /* MMKV */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MMKV;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = CAA6EA0C42BAF7EF0E048CF2 /* Project object */;
 }

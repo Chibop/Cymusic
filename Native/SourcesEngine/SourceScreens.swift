@@ -8,16 +8,35 @@ struct SourcesScreen: View {
     @State private var busy = false
     @State private var error: String?
 
+    @State private var statuses: [String: String] = [:]
+
     var body: some View {
         List {
+            Section {
+                Picker("播放音质", selection: Binding(get: { engine.quality }, set: { value in
+                    do { try engine.setQuality(value) } catch { self.error = error.localizedDescription }
+                })) {
+                    ForEach(SourceEngine.Quality.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+            }
             Section("已安装") {
                 if engine.scripts.isEmpty { Text("尚未导入音源").foregroundStyle(.secondary) }
+                if !engine.scripts.isEmpty {
+                    Button("测试音源") { run {
+                        for script in engine.scripts {
+                            statuses[script.id] = "测试中…"
+                            do { try await engine.check(script); statuses[script.id] = "正常" }
+                            catch { statuses[script.id] = error.localizedDescription }
+                        }
+                    } }
+                }
                 ForEach(engine.scripts) { item in
                     Button { run { try await engine.select(item) } } label: {
                         HStack {
                             VStack(alignment: .leading) {
                                 Text(item.name).foregroundStyle(.primary)
-                                if let author = item.metadata["author"] { Text(author).font(.caption).foregroundStyle(.secondary) }
+                                if let status = statuses[item.id] { Text(status).font(.caption) }
+                                if let author = item.metadata["author"] { Text([author, item.metadata["version"]].compactMap { $0 }.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary) }
                             }
                             Spacer()
                             if engine.selected == item.id { Image(systemName: "checkmark").accessibilityLabel("已选中") }
@@ -65,14 +84,12 @@ struct SourcesScreen: View {
 
 struct SearchScreen: View {
     @EnvironmentObject private var engine: SourceEngine
-    @EnvironmentObject private var playback: Playback
-    @EnvironmentObject private var library: Library
     var onSavePlaylist: ((String, [Song]) -> Void)? = nil
-    private enum Mode: String, CaseIterable { case qq = "QQ 音乐", playlist = "QQ 歌单", previews = "Apple 试听" }
+    private enum Mode: String, CaseIterable { case qq = "QQ 音乐", playlist = "QQ 歌单" }
     @State private var mode = Mode.qq
     @State private var input = ""
     @State private var term = ""
-    @State private var songs: [Song] = []
+    @State private var songs: [CatalogTrack] = []
     @State private var title = ""
     @State private var nextPage: Int?
     @State private var busy = false
@@ -91,24 +108,13 @@ struct SearchScreen: View {
             if !title.isEmpty {
                 Section(title) {
                     if songs.isEmpty && !busy { Text("没有找到歌曲").foregroundStyle(.secondary) }
-                    if mode == .playlist, !songs.isEmpty, let save = onSavePlaylist { Button("保存歌单") { save(title, songs) } }
-                    ForEach(songs.indices, id: \.self) { index in
-                        let song = songs[index]
-                        Button { playback.play(songs, index: index) } label: {
-                            HStack(spacing: 12) {
-                                AsyncImage(url: song.artwork) { image in image.resizable().scaledToFill() } placeholder: { Image(systemName: "music.note").foregroundStyle(.secondary) }.frame(width: 44, height: 44).background(.quaternary).clipShape(RoundedRectangle(cornerRadius: 6))
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(song.title).font(.headline).foregroundStyle(.primary)
-                                    Text(song.artist).font(.subheadline).foregroundStyle(.secondary)
-                                }.lineLimit(1)
-                            }
-                        }.swipeActions { Button { library.favorite(song) } label: { Label("收藏", systemImage: "heart") } }
-                        .contextMenu { Button { library.favorite(song) } label: { Label("收藏", systemImage: "heart") } }
-                    }
+                    if mode == .playlist, !songs.isEmpty, let save = onSavePlaylist { Button("保存歌单") { save(title, songs.map(\.song)) } }
+                    CatalogRows(tracks: songs)
                     if let nextPage { Button("更多歌曲") { search(page: nextPage) }.disabled(busy) }
                 }
             }
         }.navigationTitle("搜索")
+        .navigationDestination(for: CatalogDestination.self) { CatalogDetail(destination: $0) }
         .searchable(text: $input, prompt: mode == .playlist ? "输入歌单 ID 或链接" : "歌曲或艺人")
         .onSubmit(of: .search) { search(page: 1) }
         .onChange(of: mode) { _ in
@@ -125,18 +131,72 @@ struct SearchScreen: View {
         task = Task { @MainActor in
             defer { if !Task.isCancelled { busy = false } }
             do {
-                let result: (String, [Song])
+                let result: (String, [CatalogTrack])
                 switch mode {
                 case .qq where chart: result = try await SourceCatalog.chart()
                 case .qq: result = (query, try await SourceCatalog.search(query, page: page))
                 case .playlist: result = try await SourceCatalog.playlist(query)
-                case .previews: result = (query, try await SourceCatalog.previews(query))
                 }
                 try Task.checkCancellation()
                 title = result.0
                 var ids = Set(songs.map(\.id))
                 songs += result.1.filter { ids.insert($0.id).inserted }
                 nextPage = !chart && mode == .qq && result.1.count == 20 ? page + 1 : nil
+            } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
+        }
+    }
+}
+
+private struct CatalogRows: View {
+    let tracks: [CatalogTrack]
+    @EnvironmentObject private var playback: Playback
+    @EnvironmentObject private var library: Library
+
+    var body: some View {
+        ForEach(tracks.indices, id: \.self) { index in
+            let track = tracks[index]
+            HStack {
+                Button { playback.play(tracks.map(\.song), index: index) } label: {
+                    HStack {
+                        AsyncImage(url: track.song.artwork) { $0.resizable().scaledToFill() } placeholder: { Image(systemName: "music.note") }
+                            .frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 6))
+                        VStack(alignment: .leading) {
+                            Text(track.song.title).font(.headline)
+                            Text(track.song.artist).font(.subheadline).foregroundStyle(.secondary)
+                        }.lineLimit(1)
+                    }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+                Menu {
+                    ForEach(track.destinations, id: \.self) { target in
+                        NavigationLink(value: target) {
+                            Label(target.name, systemImage: target.kind == .artist ? "person" : "opticaldisc")
+                        }
+                    }
+                    Button { library.favorite(track.song) } label: { Label("收藏", systemImage: "heart") }
+                } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("歌曲操作")
+            }.swipeActions { Button("收藏") { library.favorite(track.song) } }
+        }
+    }
+}
+
+private struct CatalogDetail: View {
+    let destination: CatalogDestination
+    @State private var tracks: [CatalogTrack]?
+    @State private var error: String?
+    var body: some View {
+        List {
+            if let error { Text(error) }
+            else if let tracks {
+                if tracks.isEmpty { Text("没有找到歌曲") }
+                CatalogRows(tracks: tracks)
+            } else { ProgressView() }
+        }.navigationTitle(destination.name)
+        .task(id: destination) {
+            tracks = nil; error = nil
+            do {
+                let list = try await SourceCatalog.detail(destination)
+                try Task.checkCancellation()
+                tracks = list
             } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
         }
     }

@@ -7,6 +7,9 @@ import SwiftUI
     @StateObject private var library: Library
     init() {
         let engine = SourceEngine(), library = Library(), playback = Playback()
+        if let old = try? LegacyMigration.sourceSettings(documents: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]) {
+            do { try engine.restoreLegacy(old) } catch { library.message = "旧音源未迁移，原数据未改动：\(error.localizedDescription)" }
+        }
         playback.resolve = { try await engine.resolve($0) }
         playback.cached = { library.registerCache($0, $1) }
         _engine = StateObject(wrappedValue: engine)
@@ -23,19 +26,21 @@ struct RootScreen: View {
     @EnvironmentObject private var library: Library
     @EnvironmentObject private var engine: SourceEngine
     @AppStorage("appearance") private var appearance = 0
+    @AppStorage(AppLanguage.storageKey) private var language = AppLanguage.system
     @State private var playerShown = false
     var body: some View {
         shell
             .sheet(isPresented: $playerShown) { PlayerScreen().presentationDragIndicator(.visible) }
+            .environment(\.locale, language.locale)
             .preferredColorScheme(appearance == 0 ? nil : appearance == 1 ? .light : .dark)
             .receiveSharedSource { text, name in try await engine.importScript(text, name: name) }
     }
     @ViewBuilder private var shell: some View {
-        if #available(iOS 26.0, *), playback.current != nil {
-            tabs.tabViewBottomAccessory { miniPlayer }
-        } else if playback.current != nil {
+        if #available(iOS 26.1, *) {
+            tabs.tabViewBottomAccessory(isEnabled: playback.current != nil) { miniPlayer }
+        } else {
             tabs.safeAreaInset(edge: .bottom, spacing: 0) { miniPlayer.background(.regularMaterial) }
-        } else { tabs }
+        }
     }
     private var tabs: some View {
         TabView {
@@ -44,6 +49,7 @@ struct RootScreen: View {
             NavigationStack {
                 Form {
                     Section("播放来源") { NavigationLink { SourcesScreen() } label: { Label("自定义音源", systemImage: "dot.radiowaves.left.and.right") } }
+                    Section { LanguagePicker() }
                     Section("外观") { Picker("主题", selection: $appearance) { Text("跟随系统").tag(0); Text("浅色").tag(1); Text("深色").tag(2) } }
                 }.navigationTitle("设置")
             }.tabItem { Label("设置", systemImage: "gearshape") }

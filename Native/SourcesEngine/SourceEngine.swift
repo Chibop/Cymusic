@@ -6,7 +6,10 @@ struct SourceScript: Codable, Identifiable {
     let name: String
     let text: String
 
+    var exported: [String: String]? = nil
+
     var metadata: [String: String] {
+        if let exported { return exported }
         guard let opening = text.range(of: "/*"), let closing = text[opening.upperBound...].range(of: "*/") else { return [:] }
         var values = [String: String]()
         for line in text[opening.upperBound..<closing.lowerBound].split(whereSeparator: \.isNewline) {
@@ -34,14 +37,22 @@ struct SourceScript: Codable, Identifiable {
           })(module,module.exports,()=>undefined,fetch);
           if(typeof module.exports.getMusicUrl !== 'function') throw Error('缺少 getMusicUrl');
           lx.on(lx.EVENT_NAMES.request, async ({info}) => module.exports.getMusicUrl(info.musicInfo.title, info.musicInfo.artist, info.musicInfo.songmid, info.type));
-          lx.send(lx.EVENT_NAMES.inited,{sources:{tx:{type:'music',actions:['musicUrl'],qualitys:['128k','320k','flac']}}});
+          const metadata = {};
+          for (const key of ['id','author','name','version','srcUrl']) {
+            if (typeof module.exports[key] === 'string') metadata[key] = module.exports[key];
+          }
+          lx.send(lx.EVENT_NAMES.inited,{cyMetadata:metadata,sources:{tx:{type:'music',actions:['musicUrl'],qualitys:['128k','320k','flac']}}});
         })();
         """
     }
 }
 
 @MainActor final class SourceEngine: ObservableObject {
-    private struct Store: Codable { var scripts: [SourceScript]; var selected: String? }
+    enum Quality: String, Codable, CaseIterable { case low = "128k", standard = "320k", lossless = "flac" }
+    private struct Store: Codable { var scripts: [SourceScript]; var selected: String?; var quality: Quality? }
+    @Published private(set) var quality = Quality.low
+
+    func setQuality(_ value: Quality) throws { try save(scripts, selected: selected, quality: value) }
     @Published private(set) var scripts: [SourceScript] = []
     @Published private(set) var selected: String?
     @Published private(set) var notice: String?
@@ -59,8 +70,24 @@ struct SourceScript: Codable, Identifiable {
                 let state = try JSONDecoder().decode(Store.self, from: Data(contentsOf: self.store))
                 scripts = state.scripts
                 selected = state.selected
+                quality = state.quality ?? .low
             }
         } catch { notice = error.localizedDescription }
+    }
+
+    // Restore only a fresh native store. Copy script text; do not evaluate it on launch.
+    func restoreLegacy(_ values: [String: String]) throws {
+        guard !FileManager.default.fileExists(atPath: store.path), let encoded = values["music.musicApi"] else { return }
+        struct Entry: Decodable { let id: String; let name: String?; let script: String; let isSelected: Bool? }
+        struct Selection: Decodable { let id: String }
+        let entries = try JSONDecoder().decode([Entry].self, from: Data(encoded.utf8))
+        let choice = values["music.selectedMusicApi"].flatMap { try? JSONDecoder().decode(Selection.self, from: Data($0.utf8)).id } ?? entries.first(where: { $0.isSelected == true })?.id
+        var seen = Set<String>()
+        let list = entries.compactMap { entry -> SourceScript? in
+            guard !entry.script.isEmpty, seen.insert(entry.id).inserted else { return nil }
+            return SourceScript(id: entry.id, name: entry.name ?? entry.id, text: entry.script)
+        }
+        try save(list, selected: list.first(where: { $0.id == choice })?.id)
     }
 
     func importScript(_ text: String, name: String) async throws {
@@ -78,14 +105,26 @@ struct SourceScript: Codable, Identifiable {
         revision = token
         let candidate = ProviderSession(preload: preload)
         do {
-            try await candidate.load(item)
+            let exported = try await candidate.load(item)
             guard revision == token else { throw CancellationError() }
             var list = scripts
-            if adding { list.append(item) }
-            try save(list, selected: item.id)
+            let installed = SourceScript(id: item.id, name: exported?["name"].flatMap { $0.isEmpty ? nil : $0 } ?? item.name, text: item.text, exported: exported)
+            if let index = list.firstIndex(where: { $0.id == item.id || (exported?["id"]?.isEmpty == false && $0.exported?["id"] == exported?["id"]) }) {
+                list[index] = installed
+            } else if adding { list.append(installed) }
+            else { throw CancellationError() }
+            try save(list, selected: installed.id)
             session?.close()
             session = candidate
         } catch { candidate.close(); throw error }
+    }
+
+    func check(_ item: SourceScript) async throws {
+        let probe = ProviderSession(preload: preload)
+        defer { probe.close() }
+        _ = try await probe.load(item)
+        let song = Song(id: "004IArbh3ytHgR", title: "稻香", artist: "周杰伦", platform: "tx")
+        _ = try await probe.resolve(song, quality: .lossless)
     }
 
     func remove(_ item: SourceScript) throws {
@@ -95,11 +134,12 @@ struct SourceScript: Codable, Identifiable {
         if active { session?.close(); session = nil }
     }
 
-    private func save(_ scripts: [SourceScript], selected: String?) throws {
+    private func save(_ scripts: [SourceScript], selected: String?, quality: Quality? = nil) throws {
         try FileManager.default.createDirectory(at: store.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try JSONEncoder().encode(Store(scripts: scripts, selected: selected)).write(to: store, options: .atomic)
+        try JSONEncoder().encode(Store(scripts: scripts, selected: selected, quality: quality ?? self.quality)).write(to: store, options: .atomic)
         self.scripts = scripts
         self.selected = selected
+        if let quality { self.quality = quality }
         notice = nil
     }
 
@@ -115,6 +155,6 @@ struct SourceScript: Codable, Identifiable {
             }
         }
         guard let session else { throw SourceFailure("请先在音源页面导入并选择音源") }
-        return try await session.resolve(song)
+        return try await session.resolve(song, quality: quality)
     }
 }
