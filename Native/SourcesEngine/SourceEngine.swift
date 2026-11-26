@@ -6,6 +6,8 @@ struct SourceScript: Codable, Identifiable {
     let name: String
     let text: String
 
+    // Optional for stores created before capability indexing.
+    var routes: [String: [String]]? = nil
     var exported: [String: String]? = nil
 
     var metadata: [String: String] {
@@ -57,12 +59,26 @@ struct SourceScript: Codable, Identifiable {
     @Published private(set) var statuses: [String: String] = [:]
     private var tests: [String: Task<Void, Never>] = [:]
     @Published private(set) var notice: String?
+    // Process-local hints, never signed URLs. Exact metadata prevents reusing an
+    // ID across versions, catalog edits or similarly titled tracks.
+    private struct MatchKey: Hashable {
+        let platform, id, title, artist: String
+        let album, albumArtist, isrc: String?
+        let duration: Double?
+        init(_ song: Song) {
+            platform = ProviderSession.platform(song); id = song.id; title = song.title; artist = song.artist
+            album = song.album; albumArtist = song.albumArtist; isrc = song.isrc; duration = song.duration
+        }
+    }
+    private var matches = [MatchKey: Song]()
+    private var winners = [String: String]() // service -> last accepted script
+    private var revision = 0
     private let store: URL
     private let preload: URL?
-    private let matcher: (Song) async throws -> [Song]
+    private let matcher: ((Song) async throws -> [Song])?
 
     init(store: URL? = nil, preload: URL? = Bundle.main.url(forResource: "user-api-preload", withExtension: "js"),
-         matcher: @escaping (Song) async throws -> [Song] = PoolMatcher.candidates(for:)) {
+         matcher: ((Song) async throws -> [Song])? = nil) {
         self.matcher = matcher
         self.store = store ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Cymusic/providers.json")
         self.preload = preload
@@ -94,10 +110,11 @@ struct SourceScript: Codable, Identifiable {
         let metadata: [String: String]
         do { metadata = try await session.load(item) ?? item.metadata }
         catch { await session.close(); throw error }
+        let routes = await session.routes
         await session.close()
         var list = scripts
         let index = list.firstIndex { $0.text == text || (metadata["id"]?.isEmpty == false && $0.exported?["id"] == metadata["id"]) }
-        let installed = SourceScript(id: index.map { list[$0].id } ?? item.id, name: metadata["name"] ?? name, text: text, exported: metadata)
+        let installed = SourceScript(id: index.map { list[$0].id } ?? item.id, name: metadata["name"] ?? name, text: text, routes: routes, exported: metadata)
         if let index { list[index] = installed } else { list.append(installed) }
         try save(list)
         resetTest(installed.id)
@@ -109,6 +126,8 @@ struct SourceScript: Codable, Identifiable {
     }
 
     private func resetTest(_ id: String) {
+        revision += 1
+        matches.removeAll(); winners.removeAll()
         tests.removeValue(forKey: id)?.cancel()
         statuses[id] = nil
     }
@@ -154,20 +173,31 @@ struct SourceScript: Codable, Identifiable {
         try await pooled(song, scripts: scripts, quality: quality, accept: save)
     }
 
+    // Resource timeout is wall time; an inactivity timeout alone resets on each byte.
+    private nonisolated static let probeNetwork: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForResource = 4
+        return URLSession(configuration: configuration)
+    }()
+
     nonisolated private static func checkMedia(_ url: URL) async throws -> URL {
         if url.isFileURL {
             guard FileManager.default.isReadableFile(atPath: url.path) else { throw URLError(.fileDoesNotExist) }
             return url
         }
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 8)
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 4)
         request.setValue("bytes=0-1023", forHTTPHeaderField: "Range")
-        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        let (bytes, response) = try await probeNetwork.bytes(for: request)
         defer { bytes.task.cancel() }
         let mime = response.mimeType?.lowercased() ?? ""
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
               !mime.contains("json"), !mime.contains("html"), !mime.contains("xml") else { throw URLError(.badServerResponse) }
         var prefix = Data()
-        for try await byte in bytes { prefix.append(byte); if prefix.count == 64 { break } }
+        let transfer = bytes.task
+        try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            for try await byte in bytes { prefix.append(byte); if prefix.count == 64 { break } }
+        } onCancel: { transfer.cancel() }
         let text = String(decoding: prefix, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prefix.isEmpty, !text.hasPrefix("<"), !text.hasPrefix("{"), !text.hasPrefix("["),
               !mime.hasPrefix("text/") || text.hasPrefix("#EXTM3U") else { throw SourceFailure("链接未返回音频") }
@@ -176,14 +206,21 @@ struct SourceScript: Codable, Identifiable {
 
     private func pooled(_ song: Song, scripts: [SourceScript], quality: Quality,
                         accept: @escaping (URL) async throws -> URL) async throws -> Media {
+        try Task.checkCancellation()
+        let key = MatchKey(song), version = revision
         var last: Error = SourceFailure(scripts.isEmpty ? "请先导入音源" : "没有可用的匹配音源")
         if let url = song.url, url.isFileURL || ProviderSession.webURL(url.absoluteString) != nil {
-            do { return (try await accept(url), song, song.audioSource ?? (url.isFileURL ? "本地文件" : "直连"), song.quality) }
+            do {
+                let accepted = try await accept(url)
+                try Task.checkCancellation()
+                return (accepted, song, song.audioSource ?? (url.isFileURL ? "本地文件" : "直连"), song.quality)
+            }
             catch { try Task.checkCancellation(); last = error }
         }
         guard !scripts.isEmpty else { throw last }
         var sessions = [String: ProviderSession](), failed = Set<String>(), seen = Set<[String]>()
         func load(_ item: SourceScript) async throws -> ProviderSession? {
+            try Task.checkCancellation()
             if let session = sessions[item.id] { return session }
             guard !failed.contains(item.id) else { return nil }
             let session = ProviderSession(preload: preload)
@@ -192,13 +229,28 @@ struct SourceScript: Codable, Identifiable {
         }
         func attempt(_ candidate: Song) async throws -> Media? {
             guard seen.insert([ProviderSession.platform(candidate), candidate.id]).inserted else { return nil }
-            for item in scripts {
+            let platform = ProviderSession.platform(candidate)
+            let compatible = scripts.filter { $0.routes?[platform]?.contains("musicUrl") ?? ($0.routes == nil) }
+            let winner = winners[platform]
+            for item in compatible.filter({ $0.id == winner }) + compatible.filter({ $0.id != winner }) {
                 try Task.checkCancellation()
                 guard let session = try await load(item) else { continue }
                 for level in await session.qualities(for: candidate, preferred: quality) {
                     do {
                         let url = try await session.requestURL(candidate, quality: level)
-                        return (try await accept(url), candidate, item.name, level)
+                        try Task.checkCancellation()
+                        let accepted = try await accept(url)
+                        try Task.checkCancellation()
+                        if version == revision {
+                            winners[platform] = item.id
+                            if MatchKey(candidate) != key {
+                                if matches.count >= 256, matches[key] == nil, let victim = matches.keys.first { matches.removeValue(forKey: victim) }
+                                var identity = candidate
+                                identity.url = nil; identity.artwork = nil; identity.lyrics = nil
+                                matches[key] = identity
+                            }
+                        }
+                        return (accepted, candidate, item.name, level)
                     } catch { try Task.checkCancellation(); last = error }
                 }
             }
@@ -206,7 +258,11 @@ struct SourceScript: Codable, Identifiable {
         }
         func run() async throws -> Media {
             if let result = try await attempt(song) { return result }
-            for item in scripts {
+            if let remembered = matches[key] {
+                if let result = try await attempt(remembered) { return result }
+                if matches[key] == remembered { matches[key] = nil }
+            }
+            for item in scripts where item.routes?.values.contains(where: { $0.contains("search") }) ?? true {
                 guard let session = try await load(item) else { continue }
                 for platform in await session.searchPlatforms {
                     let hits: [Song]
@@ -215,8 +271,16 @@ struct SourceScript: Codable, Identifiable {
                     for hit in hits { if let result = try await attempt(hit) { return result } }
                 }
             }
-            let matches = try await matcher(song)
-            for match in matches { if let result = try await attempt(match) { return result } }
+            try Task.checkCancellation()
+            let candidates: [Song]
+            if let matcher { candidates = try await matcher(song) }
+            else {
+                let services = Set(["tx", "wy"].filter { service in scripts.contains {
+                    $0.routes?[service]?.contains("musicUrl") ?? ($0.routes == nil)
+                } })
+                candidates = try await PoolMatcher.candidates(for: song, services: services)
+            }
+            for match in candidates { if let result = try await attempt(match) { return result } }
             throw last
         }
         do {

@@ -1,0 +1,59 @@
+import Foundation
+
+@main struct Probe {
+    @MainActor static func main() async throws {
+        let root = URL(fileURLWithPath: CommandLine.arguments[1])
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        var clock = cal.date(from: .init(year: 2026, month: 11, day: 26, hour: 0, minute: 1))!
+        func cache() -> DiscoveryCache<String> { DiscoveryCache(key: "feed", directory: root, now: { clock }, calendar: cal) }
+        let first = cache()
+        await first.refresh { ["first"] }
+        clock = cal.date(byAdding: .minute, value: 1437, to: clock)!
+        let restored = cache()
+        await restored.refresh { fatalError("should use same local day after relaunch") }
+        precondition(restored.items == ["first"])
+        await restored.refresh(force: true) { ["pulled"] }
+        clock = cal.date(byAdding: .minute, value: 3, to: clock)!
+        await restored.refresh { throw URLError(.notConnectedToInternet) }
+        precondition(restored.items == ["pulled"] && restored.problem != nil && cache().items == ["pulled"])
+        await restored.refresh { ["next day"] }
+        precondition(cache().items == ["next day"])
+        print("Passed local midnight, same-day relaunch, forced refresh, stale retention and retry")
+
+        let text = "[00:01.00]fixture lyric"
+        let match = Song(id: "fixture", title: "Test", artist: "Artist", platform: "tx", lyrics: text)
+        let engine = SourceEngine(store: root.appendingPathComponent("providers.json"), preload: URL(fileURLWithPath: CommandLine.arguments[2]), matcher: { song in song.title == match.title ? [match] : [] })
+        let base = CommandLine.arguments[3]
+        try await engine.importScript("module.exports.getMusicUrl = async () => '\(base)/audio.wav'", name: "Fixture")
+        let docs = root.appendingPathComponent("docs"), index = root.appendingPathComponent("index")
+        let library = Library(documents: docs, directory: index)
+        let center = DownloadCenter(engine: engine, library: library)
+        let song = Song(id: UUID().uuidString, title: match.title, artist: match.artist, platform: "apple")
+        let broken = Song(id: UUID().uuidString, title: "Broken", artist: "Artist", url: URL(string: base + "/bad.wav"), platform: "wy")
+        var late = song; late.id = UUID().uuidString
+        let disk = root.appendingPathComponent("audio.wav")
+        defer { try? FileManager.default.removeItem(at: PlaybackFiles.folder(song)) }
+        func wait() async throws {
+            for _ in 0..<1500 where !center.pending.isEmpty { try await Task.sleep(nanoseconds: 20_000_000) }
+            precondition(center.pending.isEmpty)
+        }
+        center.enqueue([song, song, broken, late]); center.enqueue([song])
+        precondition(center.total == 3)
+        library.registerCache(late, disk) // appeared while already queued
+        try await wait()
+        precondition(center.failures.count == 1 && center.failures[.init(broken)] != nil)
+        let file = center.localFile(song)!
+        let bytes = try Data(contentsOf: file), fixture = try Data(contentsOf: disk)
+        precondition(bytes == fixture)
+        let loaded = Library(documents: docs, directory: index).localSongs.first { $0.id == song.id }
+        precondition(loaded?.lyrics == text && loaded?.audioSource == "Fixture" && loaded?.platform == "apple")
+        center.enqueue([song, late]); precondition(center.pending.isEmpty)
+        try FileManager.default.removeItem(at: file)
+        precondition(center.localFile(song) == nil)
+        var retry = song; retry.url = URL(string: base + "/audio.wav"); retry.lyrics = text
+        center.enqueue([retry]); try await wait()
+        precondition(center.localFile(song) != nil && center.failures[.init(song)] == nil)
+        print("Passed real transfer, matched timed lyrics, registration/relaunch, duplicates, late/local skip, errors and removed-file retry")
+    }
+}

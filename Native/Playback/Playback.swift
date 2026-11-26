@@ -57,6 +57,7 @@ enum PlaybackMode: String, CaseIterable {
   private let player = AVPlayer()
   private var generation = UUID(), wantsAudio = false, interrupted = false, finished = false
   private var lyricTask: Task<Void, Never>?
+  private var lyricsIdentity: Song?
   private var source: URL?, artwork: MPMediaItemArtwork?
   private var loadTask: Task<Void, Never>?, artworkTask: Task<Void, Never>?,
     sleepTask: Task<Void, Never>?
@@ -176,6 +177,7 @@ enum PlaybackMode: String, CaseIterable {
     player.replaceCurrentItem(with: nil)
     index = i
     current = song
+    lyricsIdentity = nil
     elapsed = 0
     duration = 0
     source = nil
@@ -219,6 +221,7 @@ enum PlaybackMode: String, CaseIterable {
         }
         guard self.generation == token else { return }
         self.source = url
+        self.lyricsIdentity = lyricSong
         self.offline = url.isFileURL
         let asset = AVURLAsset(
           url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: self.preciseSeeking])
@@ -227,7 +230,11 @@ enum PlaybackMode: String, CaseIterable {
         self.lyricTask = Task { @MainActor [weak self] in
           await SourceCatalog.applyLyrics(for: lyricSong, isCurrent: {
             self?.generation == token && self?.current?.id == song.id && self?.current?.platform == song.platform
-          }, apply: { self?.current?.lyrics = $0 })
+          }, apply: { text in
+            guard let self else { return }
+            self.current?.lyrics = text
+            if self.queue.indices.contains(self.index) { self.queue[self.index].lyrics = text }
+          })
         }
         self.status = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
           Task { @MainActor in
@@ -242,7 +249,7 @@ enum PlaybackMode: String, CaseIterable {
           }
         }
         if self.wantsAudio { self.startAudio() }
-        if self.autoCache { self.cacheCurrent() }
+
       } catch { if self.generation == token { self.fail(error) } }
     }
   }
@@ -264,6 +271,8 @@ enum PlaybackMode: String, CaseIterable {
     if isPlaying != playing {
       isPlaying = playing
       nowPlaying()
+      // Do not start a second full-file transfer while AVPlayer is buffering its first audio.
+      if playing && autoCache && !offline && !caching { cacheCurrent() }
     }
     loading =
       wantsAudio && !playing && errorMessage == nil
@@ -386,6 +395,7 @@ enum PlaybackMode: String, CaseIterable {
       return
     }
     guard transfers[key] == nil else { return }
+    let lyricLookup = lyricsIdentity ?? song
     caching = true
     cacheMessage = nil
     transfers[key] = Task { [weak self] in
@@ -401,6 +411,14 @@ enum PlaybackMode: String, CaseIterable {
         }
         if self?.current.map(PlaybackFiles.folder) == key { self?.offline = true }
         self?.cached?(saved, url)
+        if saved.lyrics?.isEmpty != false {
+          let currentLyrics = self?.current.flatMap { PlaybackFiles.folder($0) == key ? $0.lyrics : nil }
+          let text: String?
+          if let currentLyrics { text = currentLyrics } else { text = try? await SourceCatalog.lyrics(lyricLookup) }
+          if let text, !text.isEmpty, FileManager.default.fileExists(atPath: url.path) {
+            saved.lyrics = text; self?.cached?(saved, url)
+          }
+        }
       } catch {
         if self?.current.map(PlaybackFiles.folder) == key {
           self?.cacheMessage = error.localizedDescription

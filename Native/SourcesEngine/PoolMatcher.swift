@@ -1,8 +1,9 @@
 import Foundation
 
 enum PoolMatcher {
-    static func candidates(for song: Song) async throws -> [Song] {
+    static func candidates(for song: Song, services: Set<String> = ["tx", "wy"]) async throws -> [Song] {
         try Task.checkCancellation()
+        guard !services.isEmpty else { return [] }
         let query = [song.title, song.artist].joined(separator: " ")
         switch song.platform?.lowercased() {
         case "tx", "qq":
@@ -12,13 +13,13 @@ enum PoolMatcher {
             return [native]
         case "wy":
             guard let id = Int64(song.id), id > 0 else { return [] }
-            let qq = try? await PoolCatalog.qq(query)
+            let qq = services.contains("tx") ? try? await PoolCatalog.qq(query) : nil
             try Task.checkCancellation()
             return [song] + [match(song, in: qq ?? [])].compactMap { $0 }
         default:
             guard !key(song.title).isEmpty, !key(song.artist).isEmpty else { return [] }
-            async let qq = try? PoolCatalog.qq(query)
-            async let wy = try? PoolCatalog.netEase(query)
+            async let qq = services.contains("tx") ? try? PoolCatalog.qq(query) : nil
+            async let wy = services.contains("wy") ? try? PoolCatalog.netEase(query) : nil
             let pools = await (qq, wy)
             try Task.checkCancellation()
             guard pools.0 != nil || pools.1 != nil else { throw URLError(.cannotLoadFromNetwork) }

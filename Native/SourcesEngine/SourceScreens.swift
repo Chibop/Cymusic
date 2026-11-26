@@ -1,9 +1,9 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct SourcesScreen: View {
     @EnvironmentObject private var engine: SourceEngine
-    @State private var filePicker = false
+    @State private var adding = false
+    @State private var busy = false
     @State private var input = ""
     @State private var error: String?
 
@@ -30,31 +30,30 @@ struct SourcesScreen: View {
                     }.swipeActions { Button("删除", role: .destructive) { run { try engine.remove(item) } } }
                 }
             }
-            Section {
-                Button { filePicker = true } label: { Label("选择 JavaScript 文件", systemImage: "doc.badge.plus") }
-                TextField("粘贴脚本或脚本链接", text: $input, axis: .vertical).lineLimit(1...5).textInputAutocapitalization(.never).autocorrectionDisabled()
-                Button("导入音源") {
-                    let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
-                    run {
-                        if let url = ProviderSession.webURL(value) {
-                            let (data, response) = try await URLSession.shared.data(from: url)
-                            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode), let script = String(data: data, encoding: .utf8) else { throw SourceFailure("下载脚本失败") }
-                            try await engine.importScript(script, name: url.lastPathComponent)
-                        } else { try await engine.importScript(value, name: "自定义音源") }
-                        input = ""
-                    }
-                }.disabled(input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            } header: { Text("添加音源") } footer: { Text("导入后会运行脚本。请选择你信任的来源。") }
             if let error = error ?? engine.notice { Text(error).foregroundStyle(.secondary) }
         }.navigationTitle("音源")
-        .fileImporter(isPresented: $filePicker, allowedContentTypes: [.javaScript, .plainText, .data]) { result in
-            run {
-                let url = try result.get()
-                let accessed = url.startAccessingSecurityScopedResource()
-                defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-                try await engine.importScript(String(contentsOf: url, encoding: .utf8), name: url.deletingPathExtension().lastPathComponent)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button { input = ""; adding = true } label: { Label("添加音源", systemImage: "plus") }
+                    .disabled(busy)
             }
         }
+        .alert("添加在线音源", isPresented: $adding) {
+            TextField("https://…", text: $input)
+                .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+            Button("取消", role: .cancel) {}
+            Button("下载并导入") {
+                let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
+                busy = true
+                run {
+                    defer { busy = false }
+                    let url = try OnlineSource.link(value)
+                    let script = try await OnlineSource.download(url)
+                    try await engine.importScript(script, name: OnlineSource.name(url))
+                }
+            }
+        } message: { Text("粘贴 HTTP 或 HTTPS 脚本链接。导入后会运行脚本，请只使用可信来源。") }
+        .overlay { if busy { ProgressView("正在导入…").padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)) } }
     }
 
     private func run(_ operation: @escaping @MainActor () async throws -> Void) {

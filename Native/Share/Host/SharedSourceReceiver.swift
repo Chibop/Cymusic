@@ -1,21 +1,49 @@
 import SwiftUI
 
 private struct SharedSource: Decodable {
-    enum Kind: String, Decodable { case text, url }
-    let kind: Kind
-    let value: String
-    let name: String
+    let url: URL
+    private enum CodingKeys: String, CodingKey { case kind, value }
 
-    func confirmedText() async throws -> String {
-        if kind == .text { return value }
-        guard let url = URL(string: value), ["https", "http"].contains(url.scheme?.lowercased()), url.host != nil else {
-            throw URLError(.badURL)
+    init(from decoder: Decoder) throws {
+        let record = try decoder.container(keyedBy: CodingKeys.self)
+        guard try record.decode(String.self, forKey: .kind) == "url" else {
+            throw ImportError("不再支持导入文件或脚本文本，请分享在线链接。")
         }
+        url = try OnlineSource.link(record.decode(String.self, forKey: .value))
+    }
+}
+
+// Settings and the host revalidate all incoming links, including old inbox records.
+enum OnlineSource {
+    static func webURL(_ value: String) -> URL? {
+        guard value.utf8.count <= 8192,
+              value.rangeOfCharacter(from: .whitespacesAndNewlines.union(.controlCharacters)) == nil,
+              !value.contains("\\"), let url = URL(string: value), url.absoluteString == value,
+              let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              ["https", "http"].contains(parts.scheme?.lowercased()),
+              let host = parts.host, !host.isEmpty, parts.user == nil, parts.password == nil,
+              parts.port.map({ (1...65535).contains($0) }) ?? true else { return nil }
+        return url
+    }
+
+    static func link(_ value: String) throws -> URL {
+        guard let url = webURL(value) else { throw ImportError("请输入有效的 HTTP 或 HTTPS 脚本链接。") }
+        return url
+    }
+
+    static func name(_ url: URL) -> String {
+        url.lastPathComponent.isEmpty ? "source.js" : url.lastPathComponent
+    }
+
+    static func download(_ url: URL) async throws -> String {
+        let url = try link(url.absoluteString)
         let limit = 4 * 1024 * 1024
-        let session = URLSession(configuration: .ephemeral)
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForResource = 60
+        let session = URLSession(configuration: config, delegate: WebRedirects(), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
         let (bytes, response) = try await session.bytes(from: url)
-        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        guard let http = response as? HTTPURLResponse, let final = http.url, webURL(final.absoluteString) != nil else { throw URLError(.badServerResponse) }
         guard (200..<300).contains(http.statusCode) else { throw ImportError("服务器返回 HTTP \(http.statusCode)。") }
         guard response.expectedContentLength <= limit else { throw ImportError("脚本超过 4 MB。") }
         var data = Data()
@@ -28,6 +56,14 @@ private struct SharedSource: Decodable {
             throw ImportError("链接未返回有效的 UTF-8 脚本文本。")
         }
         return text
+    }
+}
+
+private final class WebRedirects: NSObject, URLSessionTaskDelegate {
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        let allowed = request.url.flatMap { OnlineSource.webURL($0.absoluteString) } != nil
+        completionHandler(allowed ? request : nil)
     }
 }
 
@@ -84,7 +120,14 @@ private struct SharedSourceReceiver: ViewModifier {
                 (url, try url.resourceValues(forKeys: [.creationDateKey]).creationDate ?? .distantPast)
             }.min { $0.1 < $1.1 }
             if let url = oldest?.0 {
-                item = InboxItem(id: url, content: Result { try JSONDecoder().decode(SharedSource.self, from: Data(contentsOf: url)) })
+                item = InboxItem(id: url, content: Result {
+                    let file = try FileHandle(forReadingFrom: url)
+                    defer { try? file.close() }
+                    let limit = 64 * 1024
+                    let data = try file.read(upToCount: limit + 1) ?? Data()
+                    guard data.count <= limit else { throw ImportError("分享的链接记录过大。") }
+                    return try JSONDecoder().decode(SharedSource.self, from: data)
+                })
             }
         } catch { inboxError = error.localizedDescription }
     }
@@ -104,8 +147,8 @@ private struct SharedSourceConfirmation: View {
                 switch item.content {
                 case .success(let source):
                     Section("分享内容") {
-                        Text(verbatim: source.name)
-                        Text(verbatim: String(source.value.prefix(1000))).font(.footnote.monospaced()).foregroundStyle(.secondary)
+                        Text(verbatim: OnlineSource.name(source.url))
+                        Text(verbatim: source.url.absoluteString).font(.footnote.monospaced()).foregroundStyle(.secondary)
                     }
                     if let errorMessage { Section("导入提示") { Text(verbatim: errorMessage) } }
                     Button {
@@ -115,8 +158,8 @@ private struct SharedSourceConfirmation: View {
                             defer { busy = false }
                             do {
                                 if !imported {
-                                    let text = try await source.confirmedText()
-                                    try await receive(text, source.name)
+                                    let text = try await OnlineSource.download(source.url)
+                                    try await receive(text, OnlineSource.name(source.url))
                                     imported = true
                                 }
                                 try removeItem()
@@ -124,7 +167,7 @@ private struct SharedSourceConfirmation: View {
                         }
                     } label: {
                         if busy { ProgressView() }
-                        else { Text(imported ? "完成" : (source.kind == .url ? "下载并导入" : "导入音源")) }
+                        else { Text(imported ? "完成" : "下载并导入") }
                     }.disabled(busy)
                 case .failure(let error):
                     Section("无法读取分享内容") { Text(errorMessage ?? error.localizedDescription) }

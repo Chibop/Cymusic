@@ -39,7 +39,11 @@ actor ProviderSession {
     private func wait(_ key: String, seconds: UInt64, start: () -> Void) async throws -> SourceJSON {
         let timer = Task {
             try await Task.sleep(nanoseconds: seconds * 1_000_000_000)
-            pending.removeValue(forKey: key)?.resume(throwing: SourceFailure("音源响应超时"))
+            guard let continuation = pending.removeValue(forKey: key) else { return }
+            // Each session serves one logical operation at a time. Stop its LX
+            // transfers as well, rather than leaving them running into a retry.
+            for task in http.values { task.cancel() }
+            continuation.resume(throwing: SourceFailure("音源响应超时"))
         }
         defer { timer.cancel() }
         return try await withTaskCancellationHandler {
@@ -61,7 +65,7 @@ actor ProviderSession {
         info["script"] = item.executable
         info["id"] = item.id
         info["name"] = item.name
-        let response = try await wait("init", seconds: 10) { generation = runtime.loadScript(info) }
+        let response = try await wait("init", seconds: 6) { generation = runtime.loadScript(info) }
         capabilities = (response["info"] as? SourceJSON)?["sources"] as? [String: SourceJSON] ?? [:]
         return (response["info"] as? SourceJSON)?["cyMetadata"] as? [String: String]
     }
@@ -81,6 +85,8 @@ actor ProviderSession {
         return order.drop(while: { $0 != preferred }).map(\.rawValue).filter(supported.contains)
     }
 
+    var routes: [String: [String]] { capabilities.mapValues { $0["actions"] as? [String] ?? [] } }
+
     var searchPlatforms: [String] {
         capabilities.keys.filter { (capabilities[$0]?["actions"] as? [String])?.contains("search") == true }.sorted()
     }
@@ -89,17 +95,26 @@ actor ProviderSession {
     func search(_ song: Song, platform: String) async throws -> [Song] {
         let key = UUID().uuidString
         let info = ["keyword": "\(song.title) \(song.artist)", "title": song.title, "artist": song.artist]
-        let response = try await wait(key, seconds: 10) {
+        let response = try await wait(key, seconds: 4) {
             send("request", ["requestKey": key, "data": ["action": "search", "source": platform, "info": info]])
         }
         let rows = (response["result"] as? SourceJSON)?["data"] as? [SourceJSON] ?? []
-        func norm(_ value: String) -> String { value.trimmingCharacters(in: .whitespacesAndNewlines).folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) }
-        return rows.compactMap { row in
+        let candidates: [Song] = rows.compactMap { row in
             guard let id = row["id"] as? String, !id.isEmpty, let title = row["title"] as? String,
-                  let artist = row["artist"] as? String, norm(title) == norm(song.title),
-                  song.artist.isEmpty || norm(artist) == norm(song.artist) else { return nil }
-            return Song(id: id, title: title, artist: artist, platform: platform)
+                  let artist = row["artist"] as? String else { return nil }
+            return Song(id: id, title: title, artist: artist, platform: platform, album: row["album"] as? String,
+                        duration: (row["duration"] as? NSNumber)?.doubleValue, isrc: row["isrc"] as? String)
         }
+        if song.album != nil || song.duration != nil || song.isrc != nil {
+            return PoolMatcher.match(song, in: candidates).map { [$0] } ?? []
+        }
+        // Legacy search-only scripts may supply no recording identifiers. Keep
+        // their exact title/artist path, but never pick arbitrarily among IDs.
+        func norm(_ s: String) -> String { s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+        let exact = candidates.filter { norm($0.title) == norm(song.title) && norm($0.artist) == norm(song.artist) }
+        guard !norm(song.title).isEmpty, !norm(song.artist).isEmpty, Set(exact.map(\.id)).count == 1,
+              let first = exact.first else { return [] }
+        return [first]
     }
 
     func requestURL(_ song: Song, quality: String) async throws -> URL {
@@ -109,7 +124,7 @@ actor ProviderSession {
                     "artist": song.artist, "singer": song.artist, "source": source]
         let info: SourceJSON = ["musicInfo": music, "type": quality,
                                 "requestContext": ["requestKey": key, "requestType": "current"]]
-        let response = try await wait(key, seconds: 20) {
+        let response = try await wait(key, seconds: 5) {
             send("request", ["requestKey": key, "data": ["action": "musicUrl", "source": source, "info": info]])
         }
         guard let result = response["result"] as? SourceJSON, let data = result["data"] as? SourceJSON,
@@ -139,13 +154,13 @@ actor ProviderSession {
             if data["status"] as? Bool == true { continuation.resume(returning: data) }
             else { continuation.resume(throwing: SourceFailure(data["errorMessage"] as? String ?? "音源请求失败")) }
         case "request":
-            guard http[key] == nil else { return }
+            guard !pending.isEmpty, http[key] == nil else { return }
             http[key] = Task {
                 defer { http.removeValue(forKey: key) }
                 do {
                     let response = try await fetch(data)
                     send("response", ["requestKey": key, "error": NSNull(), "response": response])
-                } catch { send("response", ["requestKey": key, "error": error.localizedDescription, "response": NSNull()]) }
+                } catch { if Task.isCancelled { return }; send("response", ["requestKey": key, "error": error.localizedDescription, "response": NSNull()]) }
             }
         default: break
         }
@@ -155,7 +170,7 @@ actor ProviderSession {
         guard let text = data["url"] as? String, let url = Self.webURL(text) else { throw URLError(.badURL) }
         let options = data["options"] as? SourceJSON ?? [:]
         var request = URLRequest(url: url)
-        request.timeoutInterval = min(60, max(1, (options["timeout"] as? Double ?? 30_000) / 1000))
+        request.timeoutInterval = min(5, max(1, (options["timeout"] as? Double ?? 5_000) / 1000))
         request.httpMethod = (options["method"] as? String ?? "GET").uppercased()
         request.allHTTPHeaderFields = options["headers"] as? [String: String]
         if !["GET", "HEAD"].contains(request.httpMethod) {

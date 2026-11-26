@@ -2,9 +2,8 @@ import UIKit
 import UniformTypeIdentifiers
 
 private struct SharedSource: Encodable {
-    var kind: String
-    var value: String
-    var name: String
+    let kind = "url"
+    let value: String
 }
 
 private struct ShareError: LocalizedError {
@@ -42,14 +41,10 @@ final class ShareViewController: UIViewController {
             do {
                 let items = extensionContext?.inputItems as? [NSExtensionItem] ?? []
                 let providers = items.flatMap { $0.attachments ?? [] }
-                let source: SharedSource
-                if let provider = providers.first, providers.count == 1 {
-                    source = try await Self.read(provider)
-                } else if providers.isEmpty, let text = items.first?.attributedContentText?.string {
-                    source = try Self.textSource(text)
-                } else {
-                    throw ShareError("请每次分享一个脚本文件、链接或文本。")
+                guard items.count == 1, providers.count == 1, let provider = providers.first else {
+                    throw ShareError("请每次分享一个 HTTP 或 HTTPS 链接。")
                 }
+                let source = try await Self.read(provider)
                 let files = FileManager.default
                 guard let group = files.containerURL(forSecurityApplicationGroupIdentifier: "group.com.music.player.gyc") else {
                     throw ShareError("无法访问 CyMusic 共享目录。")
@@ -68,78 +63,26 @@ final class ShareViewController: UIViewController {
 
     @objc private func close() { extensionContext?.completeRequest(returningItems: nil) }
 
-    private static let byteLimit = 4 * 1024 * 1024
-
-    private static func textSource(_ text: String, name: String? = nil) throws -> SharedSource {
-        guard text.utf8.count <= byteLimit else { throw ShareError("脚本超过 4 MB。") }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !text.contains("\0") else { throw ShareError("分享内容不是有效的脚本文本。") }
-        if name == nil, trimmed.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
-           let url = URL(string: trimmed), ["https", "http"].contains(url.scheme?.lowercased()), url.host != nil {
-            return SharedSource(kind: "url", value: url.absoluteString, name: url.lastPathComponent.isEmpty ? "source.js" : url.lastPathComponent)
-        }
-        return SharedSource(kind: "text", value: text, name: name ?? "source.js")
-    }
-
-    private static func fileSource(_ url: URL, name: String?) throws -> SharedSource {
-        let scoped = url.startAccessingSecurityScopedResource()
-        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        let handle = try FileHandle(forReadingFrom: url)
-        defer { try? handle.close() }
-        let bytes = try handle.read(upToCount: byteLimit + 1) ?? Data()
-        guard bytes.count <= byteLimit else { throw ShareError("脚本超过 4 MB。") }
-        guard let text = String(data: bytes, encoding: .utf8) else { throw ShareError("请分享 UTF-8 编码的脚本。") }
-        return try textSource(text, name: name ?? url.lastPathComponent)
+    private static func webURL(_ value: String) -> URL? {
+        guard value.utf8.count <= 8192,
+              value.rangeOfCharacter(from: .whitespacesAndNewlines.union(.controlCharacters)) == nil,
+              !value.contains("\\"), let url = URL(string: value), url.absoluteString == value,
+              let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              ["https", "http"].contains(parts.scheme?.lowercased()),
+              let host = parts.host, !host.isEmpty, parts.user == nil, parts.password == nil,
+              parts.port.map({ (1...65535).contains($0) }) ?? true else { return nil }
+        return url
     }
 
     private static func read(_ provider: NSItemProvider) async throws -> SharedSource {
-        let ids = provider.registeredTypeIdentifiers
-        if provider.canLoadObject(ofClass: NSURL.self) {
-            let url: URL = try await withCheckedThrowingContinuation { continuation in
-                provider.loadObject(ofClass: NSURL.self) { object, error in
-                    if let url = object as? URL { continuation.resume(returning: url) }
-                    else { continuation.resume(throwing: error ?? ShareError("无法读取链接。")) }
-                }
-            }
-            if url.isFileURL { return try fileSource(url, name: nil) }
-            let source = try textSource(url.absoluteString)
-            guard source.kind == "url" else { throw ShareError("只支持 HTTP 或 HTTPS 链接。") }
-            return source
+        guard !provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier),
+              provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) else {
+            throw ShareError("只支持 HTTP 或 HTTPS 链接。")
         }
-        if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-            let item = try await provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier)
-            if let url = item as? URL, url.isFileURL { return try fileSource(url, name: nil) }
-            if let data = item as? Data, let url = URL(dataRepresentation: data, relativeTo: nil), url.isFileURL {
-                return try fileSource(url, name: nil)
-            }
+        let item = try await provider.loadItem(forTypeIdentifier: UTType.url.identifier)
+        guard let url = item as? URL, webURL(url.absoluteString) != nil else {
+            throw ShareError("分享内容不是有效的在线链接。")
         }
-        if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
-            let item = try await provider.loadItem(forTypeIdentifier: UTType.url.identifier)
-            if let url = item as? URL {
-                if url.isFileURL { return try fileSource(url, name: nil) }
-                let source = try textSource(url.absoluteString)
-                guard source.kind == "url" else { throw ShareError("只支持 HTTP 或 HTTPS 链接。") }
-                return source
-            }
-        }
-        if provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier), provider.suggestedName == nil {
-            let item = try await provider.loadItem(forTypeIdentifier: UTType.plainText.identifier)
-            if let text = item as? String { return try textSource(text) }
-            if let url = item as? URL, url.isFileURL { return try fileSource(url, name: nil) }
-            if let bytes = item as? Data, let text = String(data: bytes, encoding: .utf8) { return try textSource(text) }
-        }
-        guard let id = ids.first(where: { UTType($0)?.conforms(to: .data) == true }) else {
-            throw ShareError("未找到脚本文件、链接或文本。")
-        }
-        // Providers may remove their temporary file as soon as the completion handler returns.
-        let suggestedName = provider.suggestedName
-        return try await withCheckedThrowingContinuation { continuation in
-            provider.loadFileRepresentation(forTypeIdentifier: id) { url, error in
-                do {
-                    guard let url else { throw error ?? ShareError("无法读取分享文件。") }
-                    continuation.resume(returning: try fileSource(url, name: suggestedName))
-                } catch { continuation.resume(throwing: error) }
-            }
-        }
+        return SharedSource(value: url.absoluteString)
     }
 }

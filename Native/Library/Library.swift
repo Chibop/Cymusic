@@ -22,6 +22,8 @@ final class Library: ObservableObject {
     var playlists: [Playlist] = []
     // Paths relative to Documents survive app container relocation.
     var documentsPaths: [String: String] = [:]
+    var externalFiles: [String: URL]?
+    var removedCacheIDs: Set<String>?
     var supportPaths: [String: String]?
     var media: [String: DiskMedia]?
     var cachedArt: [String: String]?
@@ -145,6 +147,7 @@ final class Library: ObservableObject {
       else { return nil }
       return file
     }
+    guard store.removedCacheIDs?.contains(song.id) != true else { return nil }
     if let path = store.documentsPaths[song.id],
       let file = valid(documents.appendingPathComponent(path))
     {
@@ -156,6 +159,7 @@ final class Library: ObservableObject {
     {
       return file
     }
+    if let file = valid(store.externalFiles?[song.id]) { return file }
     if let file = valid(song.url) { return file }
     #if os(iOS)
       if let file = valid(PlaybackFiles.existing(song)) { return file }
@@ -177,6 +181,7 @@ final class Library: ObservableObject {
         song.artwork = index.deletingLastPathComponent().appendingPathComponent(cover)
       }
       if let m = store.media?[song.id] {
+        song.lyrics = song.lyrics ?? m.lyrics
         song.title = m.title ?? song.title
         song.artist = m.artist ?? song.artist
         song.album = m.album ?? song.album
@@ -258,25 +263,34 @@ final class Library: ObservableObject {
     }
     var next = store
     if let i = next.songs.firstIndex(where: { $0.id == song.id }) {
-      next.songs[i] = song
+      var updated = song
+      updated.lyrics = song.lyrics ?? next.songs[i].lyrics
+      if updated.url?.isFileURL != false, next.songs[i].url?.isFileURL == false {
+        updated.url = next.songs[i].url
+      }
+      next.songs[i] = updated
     } else {
       remember(song, in: &next)
     }
     let prefix = documents.resolvingSymlinksInPath().path + "/"
     let path = file.resolvingSymlinksInPath().path
+    next.removedCacheIDs?.remove(song.id)
+    next.externalFiles?[song.id] = nil
     next.supportPaths?[song.id] = nil
     next.media?[song.id] = nil
     if path.hasPrefix(prefix) {
       next.documentsPaths[song.id] = String(path.dropFirst(prefix.count))
-    } else if let i = next.songs.firstIndex(where: { $0.id == song.id }) {
+    } else {
       next.documentsPaths.removeValue(forKey: song.id)
-      next.songs[i].url = file
       let support =
         index.deletingLastPathComponent().deletingLastPathComponent().resolvingSymlinksInPath().path
         + "/"
       if path.hasPrefix(support + "PlaybackCache/") {
         if next.supportPaths == nil { next.supportPaths = [:] }
         next.supportPaths?[song.id] = String(path.dropFirst(support.count))
+      } else {
+        if next.externalFiles == nil { next.externalFiles = [:] }
+        next.externalFiles?[song.id] = file
       }
     }
     if save(next) {
@@ -287,6 +301,7 @@ final class Library: ObservableObject {
         let base = index.deletingLastPathComponent()
         Task {
           guard let path = await DiskMedia.cacheCover(remote, directory: base),
+            localFile(song) == file,
             store.songs.first(where: { $0.id == song.id })?.artwork == remote
           else { return }
           var updated = store
@@ -296,6 +311,68 @@ final class Library: ObservableObject {
         }
       }
     }
+  }
+
+  func removeCachedTrack(_ song: Song) {
+    guard let original = store.songs.first(where: { $0.id == song.id }), loadFailure == nil else {
+      return
+    }
+    let fm = FileManager.default
+    let support = index.deletingLastPathComponent().deletingLastPathComponent()
+      .resolvingSymlinksInPath()
+    let cache = support.appendingPathComponent("PlaybackCache")
+    let docs = documents.resolvingSymlinksInPath()
+    let roots =
+      (LegacyMigration.audioFolders + ["Imported Music"]).map { docs.appendingPathComponent($0) }
+      + [cache]
+    var candidates = [localFile(original)].compactMap { $0 }
+    #if os(iOS)
+      let folder = PlaybackFiles.folder(original)
+      if let entries = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) {
+        candidates += entries.filter { $0.deletingPathExtension().lastPathComponent == "audio" }
+      }
+    #endif
+    let shared = Set(
+      store.songs.filter { $0.id != song.id }.compactMap {
+        localFile($0)?.resolvingSymlinksInPath().path
+      })
+    do {
+      for file in Set(candidates) {
+        let resolved = file.resolvingSymlinksInPath().standardizedFileURL
+        guard roots.contains(where: { resolved.path.hasPrefix($0.standardizedFileURL.path + "/") }),
+          !shared.contains(resolved.path),
+          UTType(filenameExtension: file.pathExtension)?.conforms(to: .audio) == true
+            || (resolved.path.hasPrefix(cache.path + "/")
+              && file.deletingPathExtension().lastPathComponent == "audio"),
+          (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+        else { continue }
+        try fm.removeItem(at: file)
+      }
+    } catch {
+      message = "Could not remove cached audio: \(error.localizedDescription)"
+      return
+    }
+    var next = store
+    next.documentsPaths[song.id] = nil
+    next.supportPaths?[song.id] = nil
+    next.externalFiles?[song.id] = nil
+    next.media?[song.id] = nil
+    next.cachedArt?[song.id] = nil
+    if original.platform == "local"
+      || (!next.favoriteIDs.contains(song.id)
+        && !next.playlists.contains(where: { $0.songIDs.contains(song.id) }))
+    {
+      next.songs.removeAll { $0.id == song.id }
+      next.favoriteIDs.removeAll { $0 == song.id }
+      for i in next.playlists.indices { next.playlists[i].songIDs.removeAll { $0 == song.id } }
+    } else if let i = next.songs.firstIndex(where: { $0.id == song.id }),
+      next.songs[i].url?.isFileURL == true
+    {
+      next.songs[i].url = nil
+    }
+    if next.removedCacheIDs == nil { next.removedCacheIDs = [] }
+    next.removedCacheIDs?.insert(song.id)
+    save(next)
   }
 
   private func remember(_ song: Song, in state: inout Store) {
@@ -413,13 +490,15 @@ final class Library: ObservableObject {
     var imported: [(Song, URL)] = []
     for source in urls {
       do {
-        let file = try await Task.detached(priority: .userInitiated) {
-          try Self.copyAudio(source, to: folder)
+        let (file, lyrics) = try await Task.detached(priority: .userInitiated) {
+          let granted = source.startAccessingSecurityScopedResource()
+          defer { if granted { source.stopAccessingSecurityScopedResource() } }
+          return (try Self.copyAudio(source, to: folder), DiskMedia.sidecarLyrics(source))
         }.value
         let song = Song(
           id: "local:" + file.lastPathComponent,
           title: source.deletingPathExtension().lastPathComponent, artist: "Unknown Artist",
-          platform: "local")
+          platform: "local", lyrics: lyrics)
         imported.append((song, file))
       } catch { failures.append("\(source.lastPathComponent): \(error.localizedDescription)") }
     }
@@ -473,6 +552,7 @@ private struct DiskMedia: Codable {
   var title: String?, artist: String?, album: String?, albumArtist: String?, cover: String?
   var duration: Double?, track: Int?, disc: Int?, codec: String?, rate: Double?, bits: Int?,
     kbps: Int?
+  var lyrics: String?
   var lossless = false
   var badge: String? {
     guard let codec else { return nil }
@@ -484,12 +564,21 @@ private struct DiskMedia: Codable {
     }
     return codec + (kbps.map { " · \($0) kbps" } ?? "")
   }
+  static func sidecarLyrics(_ file: URL) -> String? {
+    let url = file.deletingPathExtension().appendingPathExtension("lrc")
+    guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+      size <= 512_000
+    else { return nil }
+    return try? String(contentsOf: url, encoding: .utf8)
+  }
   static func stamp(_ file: URL) -> String? {
     guard
       let values = try? file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]),
       let bytes = values.fileSize
     else { return nil }
-    return "\(bytes):\(values.contentModificationDate?.timeIntervalSince1970 ?? 0)"
+    let sidecar = file.deletingPathExtension().appendingPathExtension("lrc")
+    let modified = try? sidecar.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+    return "\(bytes):\(values.contentModificationDate?.timeIntervalSince1970 ?? 0):\(modified?.timeIntervalSince1970 ?? 0)"
   }
   private static func artPath(_ key: String) -> String {
     "Covers/" + SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
@@ -541,6 +630,7 @@ private struct DiskMedia: Codable {
   }
   static func read(_ file: URL, stamp: String, directory: URL, id: String) async -> Self {
     var m = Self(stamp: stamp)
+    m.lyrics = sidecarLyrics(file)
     var handle: AudioFileID?
     if AudioFileOpenURL(file as CFURL, .readPermission, 0, &handle) == noErr, let handle {
       defer { AudioFileClose(handle) }

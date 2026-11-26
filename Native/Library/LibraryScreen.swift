@@ -28,11 +28,33 @@ private struct ShelfAlbum: Identifiable {
   }
 }
 
+private enum ShelfCollection: Hashable {
+  case all, favorites
+  case playlist(UUID)
+
+  @MainActor func tracks(in library: Library) -> [Song] {
+    switch self {
+    case .all: return library.localSongs
+    case .favorites: return library.localFavorites
+    case .playlist(let id):
+      return library.localTracks(library.playlists.first { $0.id == id }?.songIDs ?? [])
+    }
+  }
+  @MainActor func title(in library: Library) -> String {
+    switch self {
+    case .all: return String(localized: "All Songs")
+    case .favorites: return String(localized: "Favorites")
+    case .playlist(let id): return library.playlists.first { $0.id == id }?.name ?? ""
+    }
+  }
+}
+
 struct LibraryScreen: View {
   @EnvironmentObject private var library: Library
   @EnvironmentObject private var playback: Playback
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.scenePhase) private var scenePhase
+  @State private var collection = ShelfCollection.all
   @State private var albums: [ShelfAlbum] = []
   @State private var selected = 0
   @State private var songFlow = false
@@ -62,7 +84,7 @@ struct LibraryScreen: View {
   }
   private func menu() { if inQueue { songFlow = false } else { collections = true } }
   private func shuffle() {
-    let songs = library.localSongs.shuffled()
+    let songs = collection.tracks(in: library).shuffled()
     guard !songs.isEmpty else { return }
     playback.play(songs, index: 0)
     songFlow = true
@@ -103,6 +125,8 @@ struct LibraryScreen: View {
         colors: [Color(white: 0.95), Color(white: 0.82), Color(white: 0.93)],
         startPoint: .topLeading, endPoint: .bottomTrailing)
     )
+    .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+    .toolbarBackground(.visible, for: .navigationBar)
     .navigationTitle("Library").navigationBarTitleDisplayMode(.inline)
     .toolbar {
       ToolbarItem(placement: .navigationBarLeading) {
@@ -118,12 +142,13 @@ struct LibraryScreen: View {
           .accessibilityIdentifier("library.shuffle")
       }
     }
-    .onReceive(library.$localSongs) { songs in
-      // @Published emits before assignment; compute against the delivered snapshot.
-      let oldID = album?.id
-      albums = ShelfAlbum.collect(library, songs: songs)
-      selected = albums.firstIndex { $0.id == oldID } ?? min(selected, max(0, albums.count - 1))
+    .onChange(of: library.localSongs) { _ in refreshShelf() }
+    .onChange(of: collection.tracks(in: library)) { _ in refreshShelf() }
+    .onChange(of: collection) { _ in
+      selected = 0
+      refreshShelf()
     }
+    .onAppear { refreshShelf() }
     .task { await library.indexLocalFiles() }
     .onChange(of: scenePhase) { if $0 == .active { Task { await library.indexLocalFiles() } } }
     .sheet(item: $detail) { album in
@@ -136,7 +161,13 @@ struct LibraryScreen: View {
       }.presentationDragIndicator(.visible)
     }
     .sheet(isPresented: $collections) {
-      NavigationStack { CollectionsView() }.presentationDragIndicator(.visible)
+      NavigationStack {
+        CollectionsView(selection: $collection) { tracks, i in
+          playback.play(tracks, index: i)
+          songFlow = true
+          collections = false
+        }
+      }.presentationDragIndicator(.visible)
     }
     .fileImporter(
       isPresented: $pickingFiles, allowedContentTypes: [.audio], allowsMultipleSelection: true
@@ -159,17 +190,23 @@ struct LibraryScreen: View {
       Text(library.message ?? "")
     }
   }
+  private func refreshShelf() {
+    let oldID = album?.id
+    albums = ShelfAlbum.collect(library, songs: collection.tracks(in: library))
+    selected = albums.firstIndex { $0.id == oldID } ?? min(selected, max(0, albums.count - 1))
+  }
   private func display(_ side: CGFloat) -> some View {
     VStack(spacing: 0) {
       HStack {
-        Text(inQueue ? "Now Playing" : "Cover Flow").fontWeight(.bold)
+        Text(inQueue ? String(localized: "Now Playing") : collection.title(in: library)).fontWeight(
+          .bold)
         Spacer()
         if inQueue { Image(systemName: playback.isPlaying ? "play.fill" : "pause.fill") }
         Text(count == 0 ? "—" : "\(focus + 1) / \(count)").monospacedDigit()
       }
-      .font(.caption).foregroundStyle(.black).padding(.horizontal, 12).frame(height: 27)
-      .background(
-        LinearGradient(colors: [.white, Color(white: 0.70)], startPoint: .top, endPoint: .bottom))
+      .font(.caption).foregroundStyle(.primary).padding(.horizontal, 12).frame(height: 27)
+      .background(.regularMaterial)
+      .overlay(alignment: .bottom) { Divider() }
       if count > 0 {
         ZStack {
           Color.black.zIndex(-10)
@@ -201,7 +238,7 @@ struct LibraryScreen: View {
         }.clipped().animation(reduceMotion ? nil : .easeOut(duration: 0.23), value: focus)
           .contentShape(Rectangle()).onTapGesture { center() }
           .gesture(
-            DragGesture(minimumDistance: 16).onEnded {
+            DragGesture(minimumDistance: 22).onEnded {
               if abs($0.translation.width) > abs($0.translation.height) {
                 step($0.translation.width < 0 ? 1 : -1)
               }
@@ -212,17 +249,19 @@ struct LibraryScreen: View {
           .accessibilityAdjustableAction { step($0 == .increment ? 1 : -1) }.accessibilityAction {
             center()
           }.accessibilityIdentifier("library.coverflow")
-        VStack(spacing: 2) {
-          Text(verbatim: inQueue ? playback.current?.title ?? "" : album?.title ?? "").font(
-            .headline
-          ).accessibilityIdentifier(inQueue ? "library.currentTitle" : "library.albumTitle")
-          Text(verbatim: inQueue ? playback.current?.artist ?? "" : album?.artist ?? "").font(
-            .subheadline
-          ).foregroundStyle(Color(white: 0.76))
-          if inQueue, let badge = playback.current?.quality {
-            Text(verbatim: badge).font(.caption2.monospaced()).foregroundStyle(Color(white: 0.76))
-          }
-        }.lineLimit(1).padding(.horizontal, 8).padding(.bottom, 12).foregroundStyle(.white)
+        ShelfCaption(raw: inQueue ? playback.current?.lyrics : nil, elapsed: playback.elapsed) {
+          VStack(spacing: 2) {
+            Text(verbatim: inQueue ? playback.current?.title ?? "" : album?.title ?? "").font(
+              .headline
+            ).accessibilityIdentifier(inQueue ? "library.currentTitle" : "library.albumTitle")
+            Text(verbatim: inQueue ? playback.current?.artist ?? "" : album?.artist ?? "").font(
+              .subheadline
+            ).foregroundStyle(Color(white: 0.76))
+            if inQueue, let badge = playback.current?.quality {
+              Text(verbatim: badge).font(.caption2.monospaced()).foregroundStyle(Color(white: 0.76))
+            }
+          }.lineLimit(1).padding(.horizontal, 8).padding(.bottom, 12).foregroundStyle(.white)
+        }
       } else {
         Spacer()
         Image(systemName: "music.note.list").font(.largeTitle)
@@ -235,6 +274,36 @@ struct LibraryScreen: View {
     ).clipShape(RoundedRectangle(cornerRadius: 5)).padding(6)
       .background(RoundedRectangle(cornerRadius: 10).fill(Color(white: 0.14))).overlay(
         RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(0.7), lineWidth: 1))
+  }
+}
+
+private struct ShelfCaption<Metadata: View>: View {
+  let raw: String?, elapsed: Double
+  @ViewBuilder var metadata: () -> Metadata
+  private var lines: [PlaybackLyric] { ShelfLyrics.lines(raw) }
+  var body: some View {
+    Group {
+      if let line = lines.last(where: { ($0.time ?? .infinity) <= elapsed }) {
+        Text(verbatim: line.text).font(.headline).lineLimit(2).multilineTextAlignment(.center)
+          .padding(.horizontal, 12).padding(.bottom, 12).accessibilityIdentifier("library.lyric")
+      } else {
+        metadata()
+      }
+    }
+  }
+}
+
+@MainActor private enum ShelfLyrics {
+  // Playback ticks only select a line; parse again only when the lyric source changes.
+  private static var previous: String?
+  private static var parsed: [PlaybackLyric] = []
+  static func lines(_ raw: String?) -> [PlaybackLyric] {
+    guard let raw else { return [] }
+    if raw != previous {
+      previous = raw
+      parsed = PlaybackLyric.parse(raw).filter { $0.time != nil }
+    }
+    return parsed
   }
 }
 
@@ -280,7 +349,7 @@ private struct Jacket: View {
           }.padding(g.size.width * 0.07).frame(maxWidth: .infinity, alignment: .leading)
         }.clipped()
       }
-    }.task(id: art) {
+    }.clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous)).task(id: art) {
       loaded = nil
       guard let art, art.isFileURL else { return }
       if let hit = Self.cache.object(forKey: art as NSURL) {
@@ -316,7 +385,9 @@ private struct ClickWheel: View {
       key("backward.end.fill", "上一首", "library.previous", -p, 0) { step(-1) }
       key("forward.end.fill", "下一首", "library.next", p, 0) { step(1) }
       key("playpause.fill", "播放或暂停", "library.playPause", 0, p, play)
-      Button { press(center) } label: {
+      Button {
+        press(center)
+      } label: {
         Circle().fill(
           LinearGradient(
             colors: [Color(white: 0.87), Color(white: 0.77), Color(white: 0.9)],
@@ -343,10 +414,10 @@ private struct ClickWheel: View {
         if delta < -.pi { delta += 2 * .pi }
         angle = now
         accumulated += delta
-        while abs(accumulated) >= 0.60 {
+        while abs(accumulated) >= 0.72 {
           let d = accumulated > 0 ? 1 : -1
           step(d)
-          accumulated -= Double(d) * 0.60
+          accumulated -= Double(d) * 0.72
         }
       }.onEnded { _ in
         lastWheelDrag = ProcessInfo.processInfo.systemUptime
@@ -363,7 +434,9 @@ private struct ClickWheel: View {
     _ symbol: String, _ label: LocalizedStringKey, _ id: String, _ x: CGFloat, _ y: CGFloat,
     _ action: @escaping () -> Void
   ) -> some View {
-    Button { press(action) } label: {
+    Button {
+      press(action)
+    } label: {
       Group {
         if symbol == "MENU" {
           Text(verbatim: symbol).font(.system(size: 13, weight: .bold)).tracking(0.6)
@@ -381,7 +454,9 @@ private struct AlbumDetail: View {
   @EnvironmentObject private var library: Library
   let album: ShelfAlbum
   let play: ([Song], Int) -> Void
+  @State private var removing: Song?
   var body: some View {
+    let tracks = library.localTracks(album.tracks.map(\.id))
     ScrollView {
       VStack(spacing: 9) {
         Jacket(art: album.art, title: album.title).aspectRatio(1, contentMode: .fit).clipShape(
@@ -393,20 +468,20 @@ private struct AlbumDetail: View {
         Text(verbatim: album.artist).font(.title3).foregroundStyle(.pink)
         HStack(spacing: 12) {
           Button {
-            play(album.tracks, 0)
+            play(tracks, 0)
           } label: {
             Label("播放", systemImage: "play.fill").frame(maxWidth: .infinity, minHeight: 32)
           }
           Button {
-            play(album.tracks.shuffled(), 0)
+            play(tracks.shuffled(), 0)
           } label: {
             Label("随机播放", systemImage: "shuffle").frame(maxWidth: .infinity, minHeight: 32)
           }
-        }.buttonStyle(.bordered).tint(.pink).padding(.vertical, 12)
-        ForEach(Array(album.tracks.enumerated()), id: \.element.id) { i, song in
+        }.disabled(tracks.isEmpty).buttonStyle(.bordered).tint(.pink).padding(.vertical, 12)
+        ForEach(Array(tracks.enumerated()), id: \.element.id) { i, song in
           Divider()
           Button {
-            play(album.tracks, i)
+            play(tracks, i)
           } label: {
             HStack(spacing: 12) {
               Text("\(library.trackOrder(song).1 == Int.max ? i+1 : library.trackOrder(song).1)")
@@ -429,6 +504,7 @@ private struct AlbumDetail: View {
             Button(library.isFavorite(song) ? "Remove from favorites" : "Add to favorites") {
               library.favorite(song)
             }
+            Button("Delete cached track", role: .destructive) { removing = song }
             ForEach(library.playlists) { list in
               Button(list.name) { library.add(song, to: list.id) }
             }
@@ -436,7 +512,7 @@ private struct AlbumDetail: View {
         }
       }.padding(.horizontal, 20).padding(.bottom, 28).frame(maxWidth: 640).frame(
         maxWidth: .infinity)
-    }.toolbar {
+    }.modifier(CacheRemoval(song: $removing)).toolbar {
       ToolbarItem(placement: .confirmationAction) {
         Button {
           dismiss()
@@ -448,28 +524,41 @@ private struct AlbumDetail: View {
   }
 }
 
+private struct CacheRemoval: ViewModifier {
+  @EnvironmentObject private var library: Library
+  @Binding var song: Song?
+  func body(content: Content) -> some View {
+    content.alert(
+      "Delete cached track?",
+      isPresented: Binding(get: { song != nil }, set: { if !$0 { song = nil } }), presenting: song
+    ) { track in
+      Button("Delete", role: .destructive) { library.removeCachedTrack(track) }
+      Button("Cancel", role: .cancel) {}
+    } message: { track in
+      Text(verbatim: track.title)
+    }
+  }
+}
+
 private struct CollectionsView: View {
   @EnvironmentObject var library: Library
-  @EnvironmentObject var playback: Playback
   @Environment(\.dismiss) var dismiss
+  @Binding var selection: ShelfCollection
+  let play: ([Song], Int) -> Void
   @State private var namingPlaylist = false
   @State private var name = ""
+  @State private var removing: Song?
   var body: some View {
     List {
-      NavigationLink {
-        List { LibraryTracks(queue: library.localFavorites, playlist: nil, playback: playback) }
-          .navigationTitle("Favorites")
-      } label: {
-        Label("Favorites", systemImage: "heart")
-      }
+      row(.favorites, icon: "heart")
+      row(.all, icon: "music.note.list")
       Section("Playlists") {
         ForEach(library.playlists) { item in
-          NavigationLink {
-            PlaylistContents(id: item.id)
-          } label: {
-            Label(item.name, systemImage: "music.note.list")
-          }.swipeActions {
-            Button("Delete", role: .destructive) { library.deletePlaylist(item.id) }
+          row(.playlist(item.id), icon: "music.note.list").swipeActions {
+            Button("Delete", role: .destructive) {
+              if selection == .playlist(item.id) { selection = .all }
+              library.deletePlaylist(item.id)
+            }
           }
         }
         Button {
@@ -479,29 +568,34 @@ private struct CollectionsView: View {
           Label("New playlist", systemImage: "plus")
         }
       }
-
+      Section(selection.title(in: library)) {
+        LibraryTracks(
+          queue: selection.tracks(in: library), playlist: playlistID, play: play,
+          removing: $removing)
+      }
     }.navigationTitle("Library").toolbar {
       ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } }
-    }
-    .alert("New playlist", isPresented: $namingPlaylist) {
-      TextField("Playlist name", text: $name)
-      Button("Create") { library.createPlaylist(name) }
-      Button("Cancel", role: .cancel) {}
-    }
+    }.modifier(CacheRemoval(song: $removing))
+      .alert("New playlist", isPresented: $namingPlaylist) {
+        TextField("Playlist name", text: $name)
+        Button("Create") { library.createPlaylist(name) }
+        Button("Cancel", role: .cancel) {}
+      }
   }
-}
-
-private struct PlaylistContents: View {
-  @EnvironmentObject var library: Library
-  @EnvironmentObject var playback: Playback
-  let id: UUID
-
-  var body: some View {
-    let playlist = library.playlists.first { $0.id == id }
-    List {
-      LibraryTracks(
-        queue: library.localTracks(playlist?.songIDs ?? []), playlist: id, playback: playback)
-    }.navigationTitle(playlist?.name ?? "Playlist")
+  private var playlistID: UUID? {
+    if case .playlist(let id) = selection { return id }
+    return nil
+  }
+  private func row(_ item: ShelfCollection, icon: String) -> some View {
+    Button {
+      selection = item
+    } label: {
+      HStack {
+        Label(item.title(in: library), systemImage: icon)
+        Spacer()
+        if selection == item { Image(systemName: "checkmark").accessibilityHidden(true) }
+      }
+    }.accessibilityAddTraits(selection == item ? .isSelected : [])
   }
 }
 
@@ -509,14 +603,15 @@ private struct LibraryTracks: View {
   @EnvironmentObject var library: Library
   let queue: [Song]
   let playlist: UUID?
-  let playback: Playback
+  let play: ([Song], Int) -> Void
+  @Binding var removing: Song?
 
   var body: some View {
     if queue.isEmpty { Text("No songs yet").foregroundStyle(.secondary) }
     ForEach(Array(queue.enumerated()), id: \.element.id) { index, song in
       HStack {
         Button {
-          playback.play(queue, index: index)
+          play(queue, index)
         } label: {
           VStack(alignment: .leading) {
             Text(song.title).lineLimit(1)
@@ -535,6 +630,7 @@ private struct LibraryTracks: View {
               }
             }
           }
+          Button("Delete cached track", role: .destructive) { removing = song }
           if let playlist {
             Button("Remove from playlist", role: .destructive) {
               library.remove(song, from: playlist)

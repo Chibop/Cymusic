@@ -12,6 +12,27 @@ import Foundation
         let base = ProcessInfo.processInfo.environment["MEDIA_BASE"]!
         let song = Song(id: "mid", title: "Test", artist: "Artist", platform: "tx")
         let engine = SourceEngine(store: store, preload: preload, matcher: { _ in [song] })
+        if CommandLine.arguments.contains("--profile") {
+            // Store/import is setup, not part of tap-to-validated-URL latency.
+            let incompatible = "const end=Date.now()+150; while(Date.now()<end){}; lx.send(lx.EVENT_NAMES.inited,{sources:{kg:{actions:['musicUrl'],qualitys:['128k']}}});"
+            try await engine.importScript(incompatible, name: "Incompatible")
+            try await engine.importScript("module.exports.getMusicUrl=async()=> '\(base)/offline/profile'", name: "Unavailable")
+            try await engine.importScript("module.exports.getMusicUrl=async()=> '\(base)/profile-audio'", name: "Good")
+            let foreign = Song(id: "external", title: song.title, artist: song.artist, platform: "apple")
+            for trial in 1...5 {
+                var lookups = 0
+                let subject = SourceEngine(store: store, preload: preload, matcher: { _ in
+                    lookups += 1; try await Task.sleep(nanoseconds: 120_000_000); return [song]
+                })
+                for phase in ["cold", "warm"] {
+                    let before = lookups, start = ProcessInfo.processInfo.systemUptime
+                    let result = try await subject.resolveMedia(foreign)
+                    precondition(result.match.id == song.id && result.source == "Good")
+                    print("profile trial=\(trial) phase=\(phase) ms=\(Int((ProcessInfo.processInfo.systemUptime-start)*1000)) lookups=\(lookups-before)")
+                }
+            }
+            return
+        }
         let lx = """
         lx.on(lx.EVENT_NAMES.request, async ({info}) => '\(base)/offline/'+info.type);
         lx.send(lx.EVENT_NAMES.inited,{sources:{tx:{type:'music',actions:['musicUrl'],qualitys:['flac','320k','128k']}}});
@@ -33,6 +54,37 @@ import Foundation
             try data.write(to: dest); return dest
         }
         precondition(download.url.isFileURL && download.match.id == "mid" && download.quality == "128k")
+        // Hints must not change full-transfer fallback, including a preferred
+        // provider that passes playback validation but fails the real save.
+        var attempted: [String] = []
+        let recovered = try await restored.downloadMedia(foreign) { url in
+            attempted.append(url.path)
+            guard url.path == "/offline/flac" else { throw URLError(.cannotDecodeContentData) }
+            return download.url
+        }
+        precondition(attempted == ["/media/mid/flac", "/media/mid/320k", "/media/mid/128k", "/offline/flac"] && recovered.source == "Offline")
+        var variant = foreign; variant.album = "Live"
+        let identity = SourceEngine(store: store, preload: preload, matcher: { input in input.album == nil ? [song] : [] })
+        _ = try await identity.resolveMedia(foreign)
+        do { _ = try await identity.resolveMedia(variant); fatalError("reused studio match for live") } catch {}
+        let hanging = SourceEngine(store: store.appendingPathExtension("hang"), preload: preload, matcher: { _ in [] })
+        try await hanging.importScript("module.exports.getMusicUrl=()=>new Promise(()=>{})", name: "Never responds")
+        func elapsed(_ start: TimeInterval) -> Double { ProcessInfo.processInfo.systemUptime - start }
+        let wait = ProcessInfo.processInfo.systemUptime
+        do { _ = try await hanging.resolve(song); fatalError("accepted hung request") } catch {}
+        precondition((4...8).contains(elapsed(wait)))
+        for target in [song, Song(id: "slow", title: "Slow", artist: "", url: URL(string: base+"/drip"))] {
+            let task = Task { try await hanging.resolve(target) }
+            try await Task.sleep(nanoseconds: 250_000_000)
+            let stop = ProcessInfo.processInfo.systemUptime; task.cancel()
+            do { _ = try await task.value; fatalError("cancelled play succeeded") } catch is CancellationError {}
+            precondition(elapsed(stop) < 1.5)
+        }
+        let direct = SourceEngine(store: store.appendingPathExtension("direct"), preload: preload)
+        let start = ProcessInfo.processInfo.systemUptime
+        do { _ = try await direct.resolve(Song(id: "slow", title: "Slow", artist: "", url: URL(string: base+"/drip"))); fatalError("accepted unbounded probe") } catch {}
+        precondition((3...7).contains(elapsed(start)))
+        print("Hung request, trickling media deadline, cancellation, version identity and transfer fallback passed")
         let searcher = """
         lx.on(lx.EVENT_NAMES.request, async ({info,action}) => {if(action !== 'search') throw Error('unexpected'); return [{id:'kg-id',title:info.title,artist:info.artist}];});
         lx.send(lx.EVENT_NAMES.inited,{sources:{kg:{type:'music',actions:['search']}}});
@@ -104,7 +156,7 @@ if [[ $# -gt 0 && " ${*} " == *" --example "* ]]; then
     curl --fail --silent --show-error --max-time 20 'https://raw.githubusercontent.com/gyc-12/CyMusic-ImportMusicApi-Example/643dc33cb38a2eb3f72ac11b171100dd10834603/example1.js' -o "$work/example1.js"
 fi
 python3 - "$work" "$@" <<'PY'
-import http.server, json, os, subprocess, sys, threading
+import http.server, json, os, subprocess, sys, threading, time
 from pathlib import Path
 work = Path(sys.argv[1]).resolve()
 seen = []
@@ -113,9 +165,17 @@ class Endpoint(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         seen.append(self.path)
         base = f"http://127.0.0.1:{self.server.server_port}"
+        if self.path == '/drip':
+            self.send_response(200); self.send_header('Content-Type','audio/mpeg'); self.end_headers()
+            try:
+                for _ in range(80):
+                    self.wfile.write(b'a'); self.wfile.flush(); time.sleep(0.2)
+            except (BrokenPipeError, ConnectionResetError): pass
+            return
         if self.path == '/mid/320k':
             body, mime = json.dumps({'url':base+'/example-audio'}).encode(), 'application/json'
         elif self.path.startswith('/offline/'):
+            if self.path == '/offline/profile': time.sleep(0.12)
             self.send_error(503); return
         elif self.path.endswith('/flac'):
             body, mime = b'{"error":"unavailable"}', 'application/json'
@@ -128,7 +188,9 @@ with http.server.ThreadingHTTPServer(('127.0.0.1',0),Endpoint) as server:
     env = dict(os.environ, MEDIA_BASE=f'http://127.0.0.1:{server.server_port}')
     if '--example' in sys.argv: env.update(PROVIDER_EXAMPLE=str(work/'example1.js'), PROVIDER_BASE=env['MEDIA_BASE'])
     subprocess.run([work/'probe', work, *sys.argv[2:]], env=env, check=True, timeout=180)
+    if '--profile' in sys.argv:
+        print('profile HTTP requests:', {p:seen.count(p) for p in sorted(set(seen))}); sys.exit(0)
     expected = ['/offline/flac','/offline/320k','/offline/128k','/media/mid/flac','/media/mid/320k','/media/mid/128k']
-    assert seen[:12] == expected * 2, seen
+    assert seen[:9] == expected + expected[3:], seen
     print('HTTP server verified exact retry order independently for resolution and download.')
 PY
