@@ -161,12 +161,12 @@ globalThis.lx_setup = (key, id, name, description, version, author, homepage, ra
     local: [],
   }
   const supportActions = {
-    kw: ['musicUrl'],
-    kg: ['musicUrl'],
-    tx: ['musicUrl'],
-    wy: ['musicUrl'],
-    mg: ['musicUrl'],
-    xm: ['musicUrl'],
+    kw: ['musicUrl', 'search'],
+    kg: ['musicUrl', 'search'],
+    tx: ['musicUrl', 'search'],
+    wy: ['musicUrl', 'search'],
+    mg: ['musicUrl', 'search'],
+    xm: ['musicUrl', 'search'],
     local: ['musicUrl', 'lyric', 'pic'],
   }
 
@@ -233,6 +233,10 @@ globalThis.lx_setup = (key, id, name, description, version, author, homepage, ra
                 url: response,
               },
             }
+            break
+          case 'search':
+            if (!Array.isArray(response)) throw new Error('Expected search results')
+            result = { source: data.source, action: data.action, data: response.slice(0, 50).map(({id,title,artist}) => ({id:String(id ?? ''),title,artist})) }
             break
           case 'lyric':
             result = {
@@ -327,7 +331,7 @@ globalThis.lx_setup = (key, id, name, description, version, author, homepage, ra
         sourceInfo.sources[source] = {
           type: 'music',
           actions: actions.filter(a => userSource.actions.includes(a)),
-          qualitys: qualitys.filter(q => userSource.qualitys.includes(q)),
+          qualitys: qualitys.filter(q => Array.isArray(userSource.qualitys) && userSource.qualitys.includes(q)),
         }
       }
     } catch (error) {

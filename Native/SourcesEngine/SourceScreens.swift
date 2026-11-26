@@ -5,10 +5,8 @@ struct SourcesScreen: View {
     @EnvironmentObject private var engine: SourceEngine
     @State private var filePicker = false
     @State private var input = ""
-    @State private var busy = false
     @State private var error: String?
 
-    @State private var statuses: [String: String] = [:]
 
     var body: some View {
         List {
@@ -22,25 +20,13 @@ struct SourcesScreen: View {
             Section("已安装") {
                 if engine.scripts.isEmpty { Text("尚未导入音源").foregroundStyle(.secondary) }
                 if !engine.scripts.isEmpty {
-                    Button("测试音源") { run {
-                        for script in engine.scripts {
-                            statuses[script.id] = "测试中…"
-                            do { try await engine.check(script); statuses[script.id] = "正常" }
-                            catch { statuses[script.id] = error.localizedDescription }
-                        }
-                    } }
+                    Button("测试音源") { engine.testAll() }
                 }
                 ForEach(engine.scripts) { item in
-                    Button { run { try await engine.select(item) } } label: {
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text(item.name).foregroundStyle(.primary)
-                                if let status = statuses[item.id] { Text(status).font(.caption) }
-                                if let author = item.metadata["author"] { Text([author, item.metadata["version"]].compactMap { $0 }.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary) }
-                            }
-                            Spacer()
-                            if engine.selected == item.id { Image(systemName: "checkmark").accessibilityLabel("已选中") }
-                        }
+                    VStack(alignment: .leading) {
+                        Text(item.name)
+                        if let status = engine.statuses[item.id] { Text(status).font(.caption) }
+                        if let author = item.metadata["author"] { Text([author, item.metadata["version"]].compactMap { $0 }.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary) }
                     }.swipeActions { Button("删除", role: .destructive) { run { try engine.remove(item) } } }
                 }
             }
@@ -59,9 +45,8 @@ struct SourcesScreen: View {
                     }
                 }.disabled(input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             } header: { Text("添加音源") } footer: { Text("导入后会运行脚本。请选择你信任的来源。") }
-            if busy { ProgressView("正在加载音源") }
             if let error = error ?? engine.notice { Text(error).foregroundStyle(.secondary) }
-        }.navigationTitle("音源").disabled(busy)
+        }.navigationTitle("音源")
         .fileImporter(isPresented: $filePicker, allowedContentTypes: [.javaScript, .plainText, .data]) { result in
             run {
                 let url = try result.get()
@@ -73,131 +58,9 @@ struct SourcesScreen: View {
     }
 
     private func run(_ operation: @escaping @MainActor () async throws -> Void) {
-        busy = true
         error = nil
         Task { @MainActor in
-            defer { busy = false }
             do { try await operation() } catch { self.error = error.localizedDescription }
-        }
-    }
-}
-
-struct SearchScreen: View {
-    @EnvironmentObject private var engine: SourceEngine
-    var onSavePlaylist: ((String, [Song]) -> Void)? = nil
-    private enum Mode: String, CaseIterable { case qq = "QQ 音乐", playlist = "QQ 歌单" }
-    @State private var mode = Mode.qq
-    @State private var input = ""
-    @State private var term = ""
-    @State private var songs: [CatalogTrack] = []
-    @State private var title = ""
-    @State private var nextPage: Int?
-    @State private var busy = false
-    @State private var error: String?
-    @State private var task: Task<Void, Never>?
-
-    var body: some View {
-        List {
-            Picker("目录", selection: $mode) { ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented)
-            if mode == .qq {
-                Button { search(page: 1, chart: true) } label: { Label("浏览热歌榜", systemImage: "chart.bar") }
-                if engine.selected == nil { Text("播放 QQ 音乐前，请先选择音源。").font(.footnote).foregroundStyle(.secondary) }
-            }
-            if busy { ProgressView("正在获取目录") }
-            if let error { Text(error).foregroundStyle(.secondary) }
-            if !title.isEmpty {
-                Section(title) {
-                    if songs.isEmpty && !busy { Text("没有找到歌曲").foregroundStyle(.secondary) }
-                    if mode == .playlist, !songs.isEmpty, let save = onSavePlaylist { Button("保存歌单") { save(title, songs.map(\.song)) } }
-                    CatalogRows(tracks: songs)
-                    if let nextPage { Button("更多歌曲") { search(page: nextPage) }.disabled(busy) }
-                }
-            }
-        }.navigationTitle("搜索")
-        .navigationDestination(for: CatalogDestination.self) { CatalogDetail(destination: $0) }
-        .searchable(text: $input, prompt: mode == .playlist ? "输入歌单 ID 或链接" : "歌曲或艺人")
-        .onSubmit(of: .search) { search(page: 1) }
-        .onChange(of: mode) { _ in
-            task?.cancel(); songs = []; title = ""; nextPage = nil; busy = false; error = nil
-            if !input.isEmpty && mode != .playlist { search(page: 1) }
-        }
-    }
-
-    private func search(page: Int, chart: Bool = false) {
-        let query = (page == 1 ? input : term).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard chart || !query.isEmpty else { return }
-        task?.cancel(); busy = true; error = nil
-        if page == 1 { songs = []; nextPage = nil; title = ""; term = query }
-        task = Task { @MainActor in
-            defer { if !Task.isCancelled { busy = false } }
-            do {
-                let result: (String, [CatalogTrack])
-                switch mode {
-                case .qq where chart: result = try await SourceCatalog.chart()
-                case .qq: result = (query, try await SourceCatalog.search(query, page: page))
-                case .playlist: result = try await SourceCatalog.playlist(query)
-                }
-                try Task.checkCancellation()
-                title = result.0
-                var ids = Set(songs.map(\.id))
-                songs += result.1.filter { ids.insert($0.id).inserted }
-                nextPage = !chart && mode == .qq && result.1.count == 20 ? page + 1 : nil
-            } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
-        }
-    }
-}
-
-private struct CatalogRows: View {
-    let tracks: [CatalogTrack]
-    @EnvironmentObject private var playback: Playback
-    @EnvironmentObject private var library: Library
-
-    var body: some View {
-        ForEach(tracks.indices, id: \.self) { index in
-            let track = tracks[index]
-            HStack {
-                Button { playback.play(tracks.map(\.song), index: index) } label: {
-                    HStack {
-                        AsyncImage(url: track.song.artwork) { $0.resizable().scaledToFill() } placeholder: { Image(systemName: "music.note") }
-                            .frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 6))
-                        VStack(alignment: .leading) {
-                            Text(track.song.title).font(.headline)
-                            Text(track.song.artist).font(.subheadline).foregroundStyle(.secondary)
-                        }.lineLimit(1)
-                    }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                }.buttonStyle(.plain)
-                Menu {
-                    ForEach(track.destinations, id: \.self) { target in
-                        NavigationLink(value: target) {
-                            Label(target.name, systemImage: target.kind == .artist ? "person" : "opticaldisc")
-                        }
-                    }
-                    Button { library.favorite(track.song) } label: { Label("收藏", systemImage: "heart") }
-                } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("歌曲操作")
-            }.swipeActions { Button("收藏") { library.favorite(track.song) } }
-        }
-    }
-}
-
-private struct CatalogDetail: View {
-    let destination: CatalogDestination
-    @State private var tracks: [CatalogTrack]?
-    @State private var error: String?
-    var body: some View {
-        List {
-            if let error { Text(error) }
-            else if let tracks {
-                if tracks.isEmpty { Text("没有找到歌曲") }
-                CatalogRows(tracks: tracks)
-            } else { ProgressView() }
-        }.navigationTitle(destination.name)
-        .task(id: destination) {
-            tracks = nil; error = nil
-            do {
-                let list = try await SourceCatalog.detail(destination)
-                try Task.checkCancellation()
-                tracks = list
-            } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
         }
     }
 }

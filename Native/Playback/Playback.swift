@@ -51,7 +51,9 @@ enum PlaybackMode: String, CaseIterable {
     didSet { UserDefaults.standard.set(preciseSeeking, forKey: "playback.preciseSeeking") }
   }
   var resolve: ((Song) async throws -> URL)?
+  var resolveMedia: ((Song) async throws -> (url: URL, match: Song, source: String, quality: String?))?
   var cached: ((Song, URL) -> Void)?
+  var downloadFromPool: ((Song) async throws -> (URL, String))?
   private let player = AVPlayer()
   private var generation = UUID(), wantsAudio = false, interrupted = false, finished = false
   private var lyricTask: Task<Void, Never>?
@@ -194,12 +196,24 @@ enum PlaybackMode: String, CaseIterable {
       guard let self else { return }
       do {
         let url: URL
+        var lyricSong = song
         if let local {
           url = local
-        } else if let supplied = song.url, supplied.isFileURL || self.resolve == nil {
+        } else if let supplied = song.url, supplied.isFileURL {
           url = supplied
+        } else if let resolveMedia = self.resolveMedia {
+          let media = try await resolveMedia(song)
+          guard self.generation == token else { return }
+          url = media.url
+          lyricSong = media.match
+          self.current?.audioSource = media.source
+          if self.queue.indices.contains(self.index), self.queue[self.index].id == song.id {
+            self.queue[self.index].audioSource = media.source
+          }
         } else if let resolve = self.resolve {
           url = try await resolve(song)
+        } else if let supplied = song.url {
+          url = supplied
         } else {
           throw URLError(.resourceUnavailable)
         }
@@ -211,7 +225,7 @@ enum PlaybackMode: String, CaseIterable {
         let item = AVPlayerItem(asset: asset)
         self.player.replaceCurrentItem(with: item)
         self.lyricTask = Task { @MainActor [weak self] in
-          await SourceCatalog.applyLyrics(for: song, isCurrent: {
+          await SourceCatalog.applyLyrics(for: lyricSong, isCurrent: {
             self?.generation == token && self?.current?.id == song.id && self?.current?.platform == song.platform
           }, apply: { self?.current?.lyrics = $0 })
         }
@@ -376,9 +390,17 @@ enum PlaybackMode: String, CaseIterable {
     cacheMessage = nil
     transfers[key] = Task { [weak self] in
       do {
-        let url = try await PlaybackFiles.save(song, source: source)
+        var saved = song
+        let url: URL
+        do { url = try await PlaybackFiles.save(song, source: source) }
+        catch {
+          try Task.checkCancellation()
+          guard let fallback = self?.downloadFromPool else { throw error }
+          let result = try await fallback(song)
+          url = result.0; saved.audioSource = result.1
+        }
         if self?.current.map(PlaybackFiles.folder) == key { self?.offline = true }
-        self?.cached?(song, url)
+        self?.cached?(saved, url)
       } catch {
         if self?.current.map(PlaybackFiles.folder) == key {
           self?.cacheMessage = error.localizedDescription

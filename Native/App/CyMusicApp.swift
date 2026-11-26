@@ -10,7 +10,11 @@ import SwiftUI
         if let old = try? LegacyMigration.sourceSettings(documents: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]) {
             do { try engine.restoreLegacy(old) } catch { library.message = "旧音源未迁移，原数据未改动：\(error.localizedDescription)" }
         }
-        playback.resolve = { try await engine.resolve($0) }
+        playback.resolveMedia = { try await engine.resolveMedia($0) }
+        playback.downloadFromPool = { song in
+            let media = try await engine.downloadMedia(song) { try await PlaybackFiles.save(song, source: $0) }
+            return (media.url, media.source)
+        }
         playback.cached = { library.registerCache($0, $1) }
         _engine = StateObject(wrappedValue: engine)
         _library = StateObject(wrappedValue: library)
@@ -44,8 +48,9 @@ struct RootScreen: View {
     }
     private var tabs: some View {
         TabView {
+            NavigationStack { DiscoveryScreen() }.tabItem { Label("发现", systemImage: "sparkles") }
             NavigationStack { LibraryScreen() }.tabItem { Label("资料库", systemImage: "music.note.list") }
-            NavigationStack { SearchScreen(onSavePlaylist: { library.importPlaylist($0, songs: $1) }) }.tabItem { Label("发现", systemImage: "magnifyingglass") }
+            NavigationStack { SearchScreen() }.tabItem { Label("搜索", systemImage: "magnifyingglass") }
             NavigationStack {
                 Form {
                     Section("播放来源") { NavigationLink { SourcesScreen() } label: { Label("自定义音源", systemImage: "dot.radiowaves.left.and.right") } }

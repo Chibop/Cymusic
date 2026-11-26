@@ -6,7 +6,8 @@ struct SourceFailure: LocalizedError {
     init(_ message: String) { errorDescription = message }
 }
 
-@MainActor final class ProviderSession {
+actor ProviderSession {
+    private let preload: URL?
     private var runtime: CyMusicUserApiRuntime!
     private var generation = ""
     private var pending = [String: CheckedContinuation<SourceJSON, Error>]()
@@ -14,11 +15,13 @@ struct SourceFailure: LocalizedError {
     private let network = URLSession(configuration: .ephemeral)
     private var capabilities = [String: SourceJSON]()
 
-    init(preload: URL?) {
+    init(preload: URL?) { self.preload = preload }
+
+    private func start() {
         runtime = CyMusicUserApiRuntime(preload: preload) { [weak self] event in
             guard let action = event["action"] as? String, let generation = event["generation"] as? String,
                   let data = event["data"] as? String else { return }
-            Task { @MainActor in self?.receive(action, generation: generation, json: data) }
+            Task { await self?.receive(action, generation: generation, json: data) }
         }
         runtime.startObserving()
     }
@@ -46,11 +49,14 @@ struct SourceFailure: LocalizedError {
                 start()
             }
         } onCancel: {
-            Task { @MainActor in self.pending.removeValue(forKey: key)?.resume(throwing: CancellationError()) }
+            Task { await self.cancel(key) }
         }
     }
 
+    private func cancel(_ key: String) { pending.removeValue(forKey: key)?.resume(throwing: CancellationError()) }
+
     func load(_ item: SourceScript) async throws -> [String: String]? {
+        start()
         var info = item.metadata
         info["script"] = item.executable
         info["id"] = item.id
@@ -60,24 +66,44 @@ struct SourceFailure: LocalizedError {
         return (response["info"] as? SourceJSON)?["cyMetadata"] as? [String: String]
     }
 
-    func resolve(_ song: Song, quality: SourceEngine.Quality) async throws -> URL {
-        let source = song.platform == "QQ" ? "tx" : song.platform ?? "tx"
-        guard let capability = capabilities[source], (capability["actions"] as? [String])?.contains("musicUrl") == true else {
-            throw SourceFailure("当前音源不支持此平台")
+    static func platform(_ song: Song) -> String {
+        switch song.platform?.lowercased() {
+        case "qq", "qqmusic", "tx": return "tx"
+        default: return song.platform?.lowercased() ?? ""
         }
-        let supported = capability["qualitys"] as? [String] ?? []
-        let order: [SourceEngine.Quality] = [.lossless, .standard, .low]
-        var lastError: Error = SourceFailure("当前音源不支持所选音质")
-        for option in order.drop(while: { $0 != quality }) where supported.contains(option.rawValue) {
-            try Task.checkCancellation()
-            do { return try await requestURL(song, source: source, quality: option.rawValue) }
-            catch is CancellationError { throw CancellationError() }
-            catch { lastError = error }
-        }
-        throw lastError
     }
 
-    private func requestURL(_ song: Song, source: String, quality: String) async throws -> URL {
+    func qualities(for song: Song, preferred: SourceEngine.Quality) -> [String] {
+        guard let capability = capabilities[Self.platform(song)],
+              (capability["actions"] as? [String])?.contains("musicUrl") == true else { return [] }
+        let supported = capability["qualitys"] as? [String] ?? []
+        let order: [SourceEngine.Quality] = [.lossless, .standard, .low]
+        return order.drop(while: { $0 != preferred }).map(\.rawValue).filter(supported.contains)
+    }
+
+    var searchPlatforms: [String] {
+        capabilities.keys.filter { (capabilities[$0]?["actions"] as? [String])?.contains("search") == true }.sorted()
+    }
+
+    // Opt-in LX extension: search({keyword,title,artist}) returns [{id,title,artist}].
+    func search(_ song: Song, platform: String) async throws -> [Song] {
+        let key = UUID().uuidString
+        let info = ["keyword": "\(song.title) \(song.artist)", "title": song.title, "artist": song.artist]
+        let response = try await wait(key, seconds: 10) {
+            send("request", ["requestKey": key, "data": ["action": "search", "source": platform, "info": info]])
+        }
+        let rows = (response["result"] as? SourceJSON)?["data"] as? [SourceJSON] ?? []
+        func norm(_ value: String) -> String { value.trimmingCharacters(in: .whitespacesAndNewlines).folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) }
+        return rows.compactMap { row in
+            guard let id = row["id"] as? String, !id.isEmpty, let title = row["title"] as? String,
+                  let artist = row["artist"] as? String, norm(title) == norm(song.title),
+                  song.artist.isEmpty || norm(artist) == norm(song.artist) else { return nil }
+            return Song(id: id, title: title, artist: artist, platform: platform)
+        }
+    }
+
+    func requestURL(_ song: Song, quality: String) async throws -> URL {
+        let source = Self.platform(song)
         let key = UUID().uuidString
         let music = ["id": song.id, "songmid": song.id, "hash": song.id, "title": song.title, "name": song.title,
                     "artist": song.artist, "singer": song.artist, "source": source]

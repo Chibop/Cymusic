@@ -63,6 +63,7 @@ struct PlayerScreen: View {
                   Text(playback.current?.title ?? "").font(.title2.bold()).lineLimit(2)
                   Text(playback.current?.artist ?? "").font(.headline).foregroundStyle(.secondary)
                     .lineLimit(1)
+                  if let source = playback.current?.audioSource { Text("音频来源：\(source)").font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                 }
                 Spacer()
                 options

@@ -9,30 +9,64 @@ import Foundation
     @MainActor static func main() async throws {
         let store = URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent("providers.json")
         let preload = URL(fileURLWithPath: "Runtime/user-api-preload.js")
-        let engine = SourceEngine(store: store, preload: preload)
+        let base = ProcessInfo.processInfo.environment["MEDIA_BASE"]!
         let song = Song(id: "mid", title: "Test", artist: "Artist", platform: "tx")
-        let expected = "https://example.com/mid/128k"
+        let engine = SourceEngine(store: store, preload: preload, matcher: { _ in [song] })
         let lx = """
-        /** @name Fixture */
-        lx.on(lx.EVENT_NAMES.request, async ({info}) => 'https://example.com/'+info.musicInfo.songmid+'/'+info.type);
-        lx.send(lx.EVENT_NAMES.inited,{sources:{tx:{type:'music',actions:['musicUrl'],qualitys:['128k']}}});
+        lx.on(lx.EVENT_NAMES.request, async ({info}) => '\(base)/offline/'+info.type);
+        lx.send(lx.EVENT_NAMES.inited,{sources:{tx:{type:'music',actions:['musicUrl'],qualitys:['flac','320k','128k']}}});
         """
-        let common = "module.exports.getMusicUrl = async (name,artist,mid,q) => 'https://example.com/'+mid+'/'+q;"
-        for script in [lx, common] {
-            try await engine.importScript(script, name: "Test")
-            let url = try await engine.resolve(song)
-            precondition(url.absoluteString == expected)
-        }
+        let common = "module.exports.getMusicUrl = async (name,artist,mid,q) => '\(base)/media/'+mid+'/'+q;"
+        try await engine.importScript(lx, name: "Offline")
+        try await engine.importScript(common, name: "Working")
+        try engine.setQuality(.lossless)
         do { try await engine.importScript("throw Error('invalid')", name: "Rejected"); fatalError() } catch { }
         precondition(engine.scripts.count == 2)
-        let restored = SourceEngine(store: store, preload: preload)
-        let url = try await restored.resolve(song)
-        precondition(url.absoluteString == expected)
+        let restored = SourceEngine(store: store, preload: preload, matcher: { _ in [song] })
+        let foreign = Song(id: "apple-id", title: song.title, artist: song.artist, platform: "apple")
+        let result = try await restored.resolveMedia(foreign)
+        precondition(result.url.absoluteString == base + "/media/mid/128k" && result.match.id == "mid" && result.source == "Working" && result.quality == "128k")
+        let download = try await restored.downloadMedia(foreign) { url in
+            let (data, raw) = try await URLSession.shared.data(from: url)
+            guard (raw as? HTTPURLResponse)?.statusCode == 200, data == Data("ID3fixture".utf8) else { throw URLError(.cannotDecodeContentData) }
+            let dest = store.deletingLastPathComponent().appendingPathComponent("download")
+            try data.write(to: dest); return dest
+        }
+        precondition(download.url.isFileURL && download.match.id == "mid" && download.quality == "128k")
+        let searcher = """
+        lx.on(lx.EVENT_NAMES.request, async ({info,action}) => {if(action !== 'search') throw Error('unexpected'); return [{id:'kg-id',title:info.title,artist:info.artist}];});
+        lx.send(lx.EVENT_NAMES.inited,{sources:{kg:{type:'music',actions:['search']}}});
+        """
+        let kg = """
+        lx.on(lx.EVENT_NAMES.request, async ({info,action}) => {if(action !== 'musicUrl') throw Error('unexpected'); return '\(base)/media/'+info.musicInfo.hash+'/'+info.type;});
+        lx.send(lx.EVENT_NAMES.inited,{sources:{kg:{type:'music',actions:['musicUrl'],qualitys:['128k']}}});
+        """
+        try await restored.importScript(searcher, name: "Search only")
+        try await restored.importScript(kg, name: "KG resolver")
+        let searched = try await restored.resolveMedia(foreign)
+        precondition(searched.match.id == "kg-id" && searched.match.platform == "kg" && searched.source == "KG resolver")
+        let native = try await restored.resolve(searched.match)
+        precondition(native == searched.url)
+        let slow = SourceEngine(store: store.appendingPathExtension("slow"), preload: preload)
+        let spin = "const until=Date.now()+1200; while(Date.now()<until){};"
+        try await slow.importScript(spin + common, name: "Slow initialization")
+        let slowID = slow.scripts[0].id
+        slow.testAll(); slow.testAll()
+        let begin = ProcessInfo.processInfo.systemUptime
+        var ticks = 0, maxGap = 0.0, previous = begin
+        while slow.statuses[slowID] == "测试中…" {
+            try await Task.sleep(nanoseconds: 20_000_000)
+            let now = ProcessInfo.processInfo.systemUptime
+            maxGap = max(maxGap, now-previous); previous = now; ticks += 1
+            precondition(now-begin < 8)
+        }
+        precondition(slow.statuses[slowID] == "正常" && ticks >= 10 && maxGap < 0.25, "status=\(String(describing: slow.statuses[slowID])) ticks=\(ticks) gap=\(maxGap)")
+        print("Pool, search, non-tx, transfer, provenance and responsiveness passed: \(ticks) main-actor ticks; max gap \(maxGap)s")
         let id = try SourceCatalog.playlistID("https://y.qq.com/n/ryqq/playlist/123456")
         precondition(id == "123456")
         let item = SourceCatalog.qqSong(["mid":"abcd", "title":"Title", "singer":[["name":"Singer"]]])
         precondition(item?.id == "abcd" && item?.song.artist == "Singer")
-        print("Passed LX and CommonJS resolution, rejected import rollback, persisted selection, QQ IDs and track mapping")
+        print("Passed LX and CommonJS resolution, rejected import rollback, restored pool, QQ IDs and track mapping")
         let encoded = Data("[00:01.00]你 &amp; 我".utf8).base64EncodedString()
         precondition(SourceCatalog.decodeLyrics(["code": 0, "lyric": encoded]) == "[00:01.00]你 & 我")
         var checks = 0
@@ -40,13 +74,14 @@ import Foundation
         embedded.lyrics = "existing"
         await SourceCatalog.applyLyrics(for: embedded, isCurrent: { checks += 1; return checks == 1 }, apply: { _ in fatalError("stale lyric applied") })
         precondition(checks == 2)
-        if let path = ProcessInfo.processInfo.environment["PROVIDER_EXAMPLE"], let base = ProcessInfo.processInfo.environment["PROVIDER_BASE"] {
-            let text = try String(contentsOfFile: path, encoding: .utf8).replacingOccurrences(of: "const API_URL = '';", with: "const API_URL = '\(base)';")
+        if let path = ProcessInfo.processInfo.environment["PROVIDER_EXAMPLE"], let api = ProcessInfo.processInfo.environment["PROVIDER_BASE"] {
+            let text = try String(contentsOfFile: path, encoding: .utf8).replacingOccurrences(of: "const API_URL = '';", with: "const API_URL = '\(api)';")
             try await restored.importScript(text, name: "example1.js")
             try restored.setQuality(.standard)
+            for item in restored.scripts where item.exported?["id"] != "example1" { try restored.remove(item) }
             let again = SourceEngine(store: store, preload: preload)
             let output = try await again.resolve(song)
-            precondition(output.absoluteString == "https://example.test/mid/320k")
+            precondition(output.absoluteString == base + "/example-audio")
             precondition(again.scripts.last?.exported?["id"] == "example1" && again.scripts.last?.name == "示例音源1")
             print("README example1 passed HTTP -> JSC -> URL with restored 320k and exported metadata")
         }
@@ -64,27 +99,36 @@ import Foundation
 }
 SWIFT
 xcrun clang -fobjc-arc -c Runtime/CyMusicUserApiRuntime.m -o "$work/runtime.o"
-xcrun swiftc -import-objc-header Runtime/CyMusicUserApiRuntime.h -framework JavaScriptCore -framework Security "$work/runtime.o" ../App/Song.swift Catalog.swift ProviderSession.swift SourceEngine.swift "$work/Probe.swift" -o "$work/probe"
-if [[ " ${*} " == *" --example "* ]]; then
+xcrun swiftc -import-objc-header Runtime/CyMusicUserApiRuntime.h -framework JavaScriptCore -framework Security "$work/runtime.o" ../App/Song.swift Catalog.swift PoolCatalog.swift PoolMatcher.swift ProviderSession.swift SourceEngine.swift "$work/Probe.swift" -o "$work/probe"
+if [[ $# -gt 0 && " ${*} " == *" --example "* ]]; then
     curl --fail --silent --show-error --max-time 20 'https://raw.githubusercontent.com/gyc-12/CyMusic-ImportMusicApi-Example/643dc33cb38a2eb3f72ac11b171100dd10834603/example1.js' -o "$work/example1.js"
-    python3 - "$work" "$@" <<'PY'
+fi
+python3 - "$work" "$@" <<'PY'
 import http.server, json, os, subprocess, sys, threading
 from pathlib import Path
 work = Path(sys.argv[1]).resolve()
-class ExampleEndpoint(http.server.BaseHTTPRequestHandler):
+seen = []
+class Endpoint(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *args): pass
     def do_GET(self):
-        if self.path != "/mid/320k":
-            self.send_error(404)
-            return
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(json.dumps({"url": "https://example.test" + self.path}).encode())
-with http.server.HTTPServer(("127.0.0.1", 0), ExampleEndpoint) as server:
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    env = dict(os.environ, PROVIDER_EXAMPLE=str(work / "example1.js"), PROVIDER_BASE=f"http://127.0.0.1:{server.server_port}")
-    subprocess.run([work / "probe", work, *sys.argv[2:]], env=env, check=True)
+        seen.append(self.path)
+        base = f"http://127.0.0.1:{self.server.server_port}"
+        if self.path == '/mid/320k':
+            body, mime = json.dumps({'url':base+'/example-audio'}).encode(), 'application/json'
+        elif self.path.startswith('/offline/'):
+            self.send_error(503); return
+        elif self.path.endswith('/flac'):
+            body, mime = b'{"error":"unavailable"}', 'application/json'
+        elif self.path.endswith('/320k'):
+            body, mime = b'', 'audio/mpeg'
+        else: body, mime = b'ID3fixture', 'audio/mpeg'
+        self.send_response(200); self.send_header('Content-Type',mime); self.end_headers(); self.wfile.write(body)
+with http.server.ThreadingHTTPServer(('127.0.0.1',0),Endpoint) as server:
+    threading.Thread(target=server.serve_forever,daemon=True).start()
+    env = dict(os.environ, MEDIA_BASE=f'http://127.0.0.1:{server.server_port}')
+    if '--example' in sys.argv: env.update(PROVIDER_EXAMPLE=str(work/'example1.js'), PROVIDER_BASE=env['MEDIA_BASE'])
+    subprocess.run([work/'probe', work, *sys.argv[2:]], env=env, check=True, timeout=180)
+    expected = ['/offline/flac','/offline/320k','/offline/128k','/media/mid/flac','/media/mid/320k','/media/mid/128k']
+    assert seen[:12] == expected * 2, seen
+    print('HTTP server verified exact retry order independently for resolution and download.')
 PY
-else
-    "$work/probe" "$work" "$@"
-fi
