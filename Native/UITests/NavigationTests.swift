@@ -10,7 +10,9 @@ final class NavigationTests: XCTestCase {
         try XCTSkipUnless(shuffle.waitForExistence(timeout: 5) && shuffle.isEnabled, "Requires local audio fixtures")
         app.buttons["library.openAlbum"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["library.albumDetail"].firstMatch.waitForExistence(timeout: 5))
-        app.navigationBars.buttons.firstMatch.tap()
+        app.buttons["关闭"].firstMatch.tap()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.descendants(matching: .any)["library.albumDetail"].firstMatch)
+        waitForExpectations(timeout: 5)
         shuffle.tap()
         let lyric = app.staticTexts["library.lyric"]
         if lyric.waitForExistence(timeout: 1), lyric.label.hasPrefix("Fixture ") {
@@ -22,7 +24,7 @@ final class NavigationTests: XCTestCase {
         XCTAssertTrue(flow.waitForExistence(timeout: 5))
         let first = try XCTUnwrap(flow.value as? String)
         XCTAssertFalse(first.isEmpty)
-        flow.swipeLeft()
+        flow.coordinate(withNormalizedOffset: CGVector(dx: 0.78, dy: 0.5)).press(forDuration: 0.1, thenDragTo: flow.coordinate(withNormalizedOffset: CGVector(dx: 0.23, dy: 0.5)))
         let changed = NSPredicate(format: "value != %@ AND value != ''", first)
         expectation(for: changed, evaluatedWith: flow)
         waitForExpectations(timeout: 5)
