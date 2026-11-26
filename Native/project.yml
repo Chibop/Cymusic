@@ -1,0 +1,65 @@
+name: CyMusicNative
+options:
+  deploymentTarget:
+    iOS: "16.4"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.3.0"
+    CURRENT_PROJECT_VERSION: 2
+    TARGETED_DEVICE_FAMILY: "1,2"
+    GENERATE_INFOPLIST_FILE: YES
+    CODE_SIGN_STYLE: Automatic
+targets:
+  CyMusic:
+    type: application
+    platform: iOS
+    sources:
+      - App
+      - Library
+      - Playback
+      - path: SourcesEngine
+        excludes: ["README.md", "verify-engine.sh", "Runtime/user-api-preload.js"]
+      - path: SourcesEngine/Runtime/user-api-preload.js
+        buildPhase: resources
+      - Share/Host
+      - ../ios/CyMusic/Images.xcassets
+    dependencies:
+      - sdk: JavaScriptCore.framework
+      - sdk: Security.framework
+      - target: CyMusicShare
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.music.player.gyc
+        PRODUCT_NAME: CyMusic
+        SWIFT_OBJC_BRIDGING_HEADER: SourcesEngine/Runtime/CyMusicUserApiRuntime.h
+        INFOPLIST_FILE: Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_ENTITLEMENTS: ../ios/CyMusic/CyMusic.entitlements
+  CyMusicShare:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Share/Extension
+        excludes: ["*.plist", "*.entitlements"]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.music.player.gyc.share-extension
+        INFOPLIST_FILE: Share/Extension/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Share/Extension/CyMusicShare.entitlements
+  CyMusicUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: CyMusic
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.music.player.gyc.uitests
+schemes:
+  CyMusic:
+    build:
+      targets:
+        CyMusic: all
+    test:
+      targets: [CyMusicUITests]

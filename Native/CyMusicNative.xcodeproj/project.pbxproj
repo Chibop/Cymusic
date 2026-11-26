@@ -1,0 +1,661 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		05E46E5BC35AB9BEC9A32C5F /* PlayerScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CB5E862940289CF142A58E3 /* PlayerScreen.swift */; };
+		2F7E5BDA39BE8B774948888C /* CyMusicShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F5A6C410181D5358EF749B60 /* CyMusicShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		3D2972C88CF63CC10767344D /* Catalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21BCD60D60272E20F16D0789 /* Catalog.swift */; };
+		3D56442D838445837BFA7F56 /* Playback.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67B3D9AC8610D0720F0E0210 /* Playback.swift */; };
+		4F1465796911F879633B77EA /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8B7B2538BB639B548164CA0B /* Images.xcassets */; };
+		62B5B5B408C7F2A7945BEB57 /* CyMusicUserApiRuntime.m in Sources */ = {isa = PBXBuildFile; fileRef = 659E3197CF737B8E13EA6D61 /* CyMusicUserApiRuntime.m */; };
+		6AC3FB3F3B58E05A410D2555 /* NavigationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED65D1641B9C686F1380359C /* NavigationTests.swift */; };
+		6E7D8B3AE9C66EA610DB394A /* JavaScriptCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 04A05074FE7B9C9AAF268768 /* JavaScriptCore.framework */; };
+		763199D6BFEEC9EE915408EE /* Library.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEB5C4FA9DAC6661427C7DEB /* Library.swift */; };
+		91C67E4218010918AD6931A6 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DDF6D4C63A19FD0A400F2584 /* Security.framework */; };
+		933ED63D17BADB0ED441F0BD /* LibraryScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFEFE2F023E902DF4ABB94B3 /* LibraryScreen.swift */; };
+		99ACB778E89CB161A1D83CEB /* SharedSourceReceiver.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD34FB76DD2F620CAE09EEA9 /* SharedSourceReceiver.swift */; };
+		A095823BBC0C613B2D01882C /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B437B91F473C55AB2AC8E505 /* ShareViewController.swift */; };
+		AC56CACDC275050176326F8D /* SourceScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C8BEEE88E58A3059EA33C07 /* SourceScreens.swift */; };
+		B6CEE390DD754F437891A1B4 /* PlaybackMedia.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82C491E5D131CC4F8D3577C2 /* PlaybackMedia.swift */; };
+		D8F165E9C26EAB9D6D0E5238 /* user-api-preload.js in Resources */ = {isa = PBXBuildFile; fileRef = 5E5EC19FD8A1E2B67F336C60 /* user-api-preload.js */; };
+		DDB2DBF24D113133E3846A68 /* Song.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03FD87B1E7CDB6B6253F63D7 /* Song.swift */; };
+		F2781676E359DC74013FABFF /* SourceEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2101E01BAEA5D1CAC9ABFD44 /* SourceEngine.swift */; };
+		F472C21DC1B3D1B23E97ABF6 /* CyMusicApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 364291DFBED8A1FCD1C3F493 /* CyMusicApp.swift */; };
+		F59D0D1985E28FF418421D86 /* ProviderSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 727EC6D8C37057E239971293 /* ProviderSession.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		85ACB69957ABD83516B8E534 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CAA6EA0C42BAF7EF0E048CF2 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FA0F783E722FCF2463AA2217;
+			remoteInfo = CyMusic;
+		};
+		BE5F1DCA0D150FC68E3216AC /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CAA6EA0C42BAF7EF0E048CF2 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 899B99E19A71B774B8B54B4C;
+			remoteInfo = CyMusicShare;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		722878B9221769B4AD84AC20 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				2F7E5BDA39BE8B774948888C /* CyMusicShare.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		0255553C4189FEF0ADA3D136 /* CyMusicUserApiRuntime.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = CyMusicUserApiRuntime.h; sourceTree = "<group>"; };
+		03FD87B1E7CDB6B6253F63D7 /* Song.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Song.swift; sourceTree = "<group>"; };
+		04A05074FE7B9C9AAF268768 /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
+		04F47E3A9A3D9266680AA9C0 /* CyMusicUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = CyMusicUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		2101E01BAEA5D1CAC9ABFD44 /* SourceEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceEngine.swift; sourceTree = "<group>"; };
+		21BCD60D60272E20F16D0789 /* Catalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Catalog.swift; sourceTree = "<group>"; };
+		2C8BEEE88E58A3059EA33C07 /* SourceScreens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceScreens.swift; sourceTree = "<group>"; };
+		313376DB645DA323DC9FF7ED /* CyMusic.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = CyMusic.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		364291DFBED8A1FCD1C3F493 /* CyMusicApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CyMusicApp.swift; sourceTree = "<group>"; };
+		5E5EC19FD8A1E2B67F336C60 /* user-api-preload.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "user-api-preload.js"; sourceTree = "<group>"; };
+		659E3197CF737B8E13EA6D61 /* CyMusicUserApiRuntime.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = CyMusicUserApiRuntime.m; sourceTree = "<group>"; };
+		67B3D9AC8610D0720F0E0210 /* Playback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Playback.swift; sourceTree = "<group>"; };
+		727EC6D8C37057E239971293 /* ProviderSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderSession.swift; sourceTree = "<group>"; };
+		82C491E5D131CC4F8D3577C2 /* PlaybackMedia.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackMedia.swift; sourceTree = "<group>"; };
+		8B7B2538BB639B548164CA0B /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Images.xcassets; sourceTree = "<group>"; };
+		9CB5E862940289CF142A58E3 /* PlayerScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerScreen.swift; sourceTree = "<group>"; };
+		B437B91F473C55AB2AC8E505 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		CD34FB76DD2F620CAE09EEA9 /* SharedSourceReceiver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedSourceReceiver.swift; sourceTree = "<group>"; };
+		DDF6D4C63A19FD0A400F2584 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
+		DEB5C4FA9DAC6661427C7DEB /* Library.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Library.swift; sourceTree = "<group>"; };
+		DFEFE2F023E902DF4ABB94B3 /* LibraryScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryScreen.swift; sourceTree = "<group>"; };
+		ED65D1641B9C686F1380359C /* NavigationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationTests.swift; sourceTree = "<group>"; };
+		F5A6C410181D5358EF749B60 /* CyMusicShare.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = CyMusicShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		F0827B296C211539A9C3BEF5 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6E7D8B3AE9C66EA610DB394A /* JavaScriptCore.framework in Frameworks */,
+				91C67E4218010918AD6931A6 /* Security.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		0F0712B772BC71278669B1B8 /* Host */ = {
+			isa = PBXGroup;
+			children = (
+				CD34FB76DD2F620CAE09EEA9 /* SharedSourceReceiver.swift */,
+			);
+			name = Host;
+			path = Share/Host;
+			sourceTree = "<group>";
+		};
+		1BB32DC6D87DC0837B17368A /* Extension */ = {
+			isa = PBXGroup;
+			children = (
+				B437B91F473C55AB2AC8E505 /* ShareViewController.swift */,
+			);
+			name = Extension;
+			path = Share/Extension;
+			sourceTree = "<group>";
+		};
+		2C4C08FE95DFFD8DFA097C00 /* SourcesEngine */ = {
+			isa = PBXGroup;
+			children = (
+				21BCD60D60272E20F16D0789 /* Catalog.swift */,
+				727EC6D8C37057E239971293 /* ProviderSession.swift */,
+				2101E01BAEA5D1CAC9ABFD44 /* SourceEngine.swift */,
+				2C8BEEE88E58A3059EA33C07 /* SourceScreens.swift */,
+				54C67A489FCFD42786CC82B9 /* Runtime */,
+			);
+			path = SourcesEngine;
+			sourceTree = "<group>";
+		};
+		333C792CFD528F3BA81B630D = {
+			isa = PBXGroup;
+			children = (
+				CAA6BD6FDA07A54C3587DF00 /* App */,
+				7DF1A7EC1EA8FBB0F4F96F9D /* CyMusic */,
+				1BB32DC6D87DC0837B17368A /* Extension */,
+				0F0712B772BC71278669B1B8 /* Host */,
+				7F7C78D2F128FF2E902D6E85 /* Library */,
+				FC2654B0442866FF59029814 /* Playback */,
+				2C4C08FE95DFFD8DFA097C00 /* SourcesEngine */,
+				ABD0432FB2B1A02D5BAB6013 /* UITests */,
+				F094CE4B765C0290D64B0D18 /* Frameworks */,
+				43E235F3EEF78A8F14DCE8F7 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		43E235F3EEF78A8F14DCE8F7 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				313376DB645DA323DC9FF7ED /* CyMusic.app */,
+				F5A6C410181D5358EF749B60 /* CyMusicShare.appex */,
+				04F47E3A9A3D9266680AA9C0 /* CyMusicUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		54C67A489FCFD42786CC82B9 /* Runtime */ = {
+			isa = PBXGroup;
+			children = (
+				0255553C4189FEF0ADA3D136 /* CyMusicUserApiRuntime.h */,
+				659E3197CF737B8E13EA6D61 /* CyMusicUserApiRuntime.m */,
+				5E5EC19FD8A1E2B67F336C60 /* user-api-preload.js */,
+			);
+			path = Runtime;
+			sourceTree = "<group>";
+		};
+		7DF1A7EC1EA8FBB0F4F96F9D /* CyMusic */ = {
+			isa = PBXGroup;
+			children = (
+				8B7B2538BB639B548164CA0B /* Images.xcassets */,
+			);
+			name = CyMusic;
+			path = ../ios/CyMusic;
+			sourceTree = "<group>";
+		};
+		7F7C78D2F128FF2E902D6E85 /* Library */ = {
+			isa = PBXGroup;
+			children = (
+				DEB5C4FA9DAC6661427C7DEB /* Library.swift */,
+				DFEFE2F023E902DF4ABB94B3 /* LibraryScreen.swift */,
+			);
+			path = Library;
+			sourceTree = "<group>";
+		};
+		ABD0432FB2B1A02D5BAB6013 /* UITests */ = {
+			isa = PBXGroup;
+			children = (
+				ED65D1641B9C686F1380359C /* NavigationTests.swift */,
+			);
+			path = UITests;
+			sourceTree = "<group>";
+		};
+		CAA6BD6FDA07A54C3587DF00 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				364291DFBED8A1FCD1C3F493 /* CyMusicApp.swift */,
+				03FD87B1E7CDB6B6253F63D7 /* Song.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		F094CE4B765C0290D64B0D18 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				04A05074FE7B9C9AAF268768 /* JavaScriptCore.framework */,
+				DDF6D4C63A19FD0A400F2584 /* Security.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		FC2654B0442866FF59029814 /* Playback */ = {
+			isa = PBXGroup;
+			children = (
+				67B3D9AC8610D0720F0E0210 /* Playback.swift */,
+				82C491E5D131CC4F8D3577C2 /* PlaybackMedia.swift */,
+				9CB5E862940289CF142A58E3 /* PlayerScreen.swift */,
+			);
+			path = Playback;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		52E51E7E6AEF734F7F807438 /* CyMusicUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FC4EB5706540D8AB157A0F5B /* Build configuration list for PBXNativeTarget "CyMusicUITests" */;
+			buildPhases = (
+				D7094D7E7EE707FC246B7B34 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				8C9AB2EAE73C9F031BAD4197 /* PBXTargetDependency */,
+			);
+			name = CyMusicUITests;
+			packageProductDependencies = (
+			);
+			productName = CyMusicUITests;
+			productReference = 04F47E3A9A3D9266680AA9C0 /* CyMusicUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		899B99E19A71B774B8B54B4C /* CyMusicShare */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D2C670EACEA66280179B45AF /* Build configuration list for PBXNativeTarget "CyMusicShare" */;
+			buildPhases = (
+				FD5DD23709FEF23D7DADA9E4 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = CyMusicShare;
+			packageProductDependencies = (
+			);
+			productName = CyMusicShare;
+			productReference = F5A6C410181D5358EF749B60 /* CyMusicShare.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		FA0F783E722FCF2463AA2217 /* CyMusic */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CE651E88AACDCA1A45EB5642 /* Build configuration list for PBXNativeTarget "CyMusic" */;
+			buildPhases = (
+				0E9589B19236F1EA106F329E /* Sources */,
+				A347C2A60DFB5B679397C141 /* Resources */,
+				F0827B296C211539A9C3BEF5 /* Frameworks */,
+				722878B9221769B4AD84AC20 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				9A820656B53234FF02D16D5E /* PBXTargetDependency */,
+			);
+			name = CyMusic;
+			packageProductDependencies = (
+			);
+			productName = CyMusic;
+			productReference = 313376DB645DA323DC9FF7ED /* CyMusic.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		CAA6EA0C42BAF7EF0E048CF2 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					52E51E7E6AEF734F7F807438 = {
+						ProvisioningStyle = Automatic;
+						TestTargetID = FA0F783E722FCF2463AA2217;
+					};
+					899B99E19A71B774B8B54B4C = {
+						ProvisioningStyle = Automatic;
+					};
+					FA0F783E722FCF2463AA2217 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 60AAC4EC95BCEBF1A811E8B3 /* Build configuration list for PBXProject "CyMusicNative" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 333C792CFD528F3BA81B630D;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 43E235F3EEF78A8F14DCE8F7 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				FA0F783E722FCF2463AA2217 /* CyMusic */,
+				899B99E19A71B774B8B54B4C /* CyMusicShare */,
+				52E51E7E6AEF734F7F807438 /* CyMusicUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A347C2A60DFB5B679397C141 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4F1465796911F879633B77EA /* Images.xcassets in Resources */,
+				D8F165E9C26EAB9D6D0E5238 /* user-api-preload.js in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		0E9589B19236F1EA106F329E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3D2972C88CF63CC10767344D /* Catalog.swift in Sources */,
+				F472C21DC1B3D1B23E97ABF6 /* CyMusicApp.swift in Sources */,
+				62B5B5B408C7F2A7945BEB57 /* CyMusicUserApiRuntime.m in Sources */,
+				763199D6BFEEC9EE915408EE /* Library.swift in Sources */,
+				933ED63D17BADB0ED441F0BD /* LibraryScreen.swift in Sources */,
+				3D56442D838445837BFA7F56 /* Playback.swift in Sources */,
+				B6CEE390DD754F437891A1B4 /* PlaybackMedia.swift in Sources */,
+				05E46E5BC35AB9BEC9A32C5F /* PlayerScreen.swift in Sources */,
+				F59D0D1985E28FF418421D86 /* ProviderSession.swift in Sources */,
+				99ACB778E89CB161A1D83CEB /* SharedSourceReceiver.swift in Sources */,
+				DDB2DBF24D113133E3846A68 /* Song.swift in Sources */,
+				F2781676E359DC74013FABFF /* SourceEngine.swift in Sources */,
+				AC56CACDC275050176326F8D /* SourceScreens.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D7094D7E7EE707FC246B7B34 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6AC3FB3F3B58E05A410D2555 /* NavigationTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FD5DD23709FEF23D7DADA9E4 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A095823BBC0C613B2D01882C /* ShareViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		8C9AB2EAE73C9F031BAD4197 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FA0F783E722FCF2463AA2217 /* CyMusic */;
+			targetProxy = 85ACB69957ABD83516B8E534 /* PBXContainerItemProxy */;
+		};
+		9A820656B53234FF02D16D5E /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 899B99E19A71B774B8B54B4C /* CyMusicShare */;
+			targetProxy = BE5F1DCA0D150FC68E3216AC /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		02C61A3AEA7C472D616F5390 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 2;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
+				MARKETING_VERSION = 1.3.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		25747F9527F11FBA3394A6D0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 2;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
+				MARKETING_VERSION = 1.3.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		34870B04C38B1EDC562DE4DA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.music.player.gyc.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = CyMusic;
+			};
+			name = Debug;
+		};
+		4B16CBAEE09A86928ADA16CF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.music.player.gyc.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = CyMusic;
+			};
+			name = Release;
+		};
+		60EEEDF27443F4F61DF6BA02 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = ../ios/CyMusic/CyMusic.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.music.player.gyc;
+				PRODUCT_NAME = CyMusic;
+				SDKROOT = iphoneos;
+				SWIFT_OBJC_BRIDGING_HEADER = SourcesEngine/Runtime/CyMusicUserApiRuntime.h;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		62CAC2D13D63816AE7E46C57 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Share/Extension/CyMusicShare.entitlements;
+				INFOPLIST_FILE = Share/Extension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.music.player.gyc.share-extension";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		69CAB6C1C9DE6C293F9B2D79 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Share/Extension/CyMusicShare.entitlements;
+				INFOPLIST_FILE = Share/Extension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.music.player.gyc.share-extension";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		8004EF2EADE50F48F04688A2 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = ../ios/CyMusic/CyMusic.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.music.player.gyc;
+				PRODUCT_NAME = CyMusic;
+				SDKROOT = iphoneos;
+				SWIFT_OBJC_BRIDGING_HEADER = SourcesEngine/Runtime/CyMusicUserApiRuntime.h;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		60AAC4EC95BCEBF1A811E8B3 /* Build configuration list for PBXProject "CyMusicNative" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				02C61A3AEA7C472D616F5390 /* Debug */,
+				25747F9527F11FBA3394A6D0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		CE651E88AACDCA1A45EB5642 /* Build configuration list for PBXNativeTarget "CyMusic" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8004EF2EADE50F48F04688A2 /* Debug */,
+				60EEEDF27443F4F61DF6BA02 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		D2C670EACEA66280179B45AF /* Build configuration list for PBXNativeTarget "CyMusicShare" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				62CAC2D13D63816AE7E46C57 /* Debug */,
+				69CAB6C1C9DE6C293F9B2D79 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		FC4EB5706540D8AB157A0F5B /* Build configuration list for PBXNativeTarget "CyMusicUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				34870B04C38B1EDC562DE4DA /* Debug */,
+				4B16CBAEE09A86928ADA16CF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = CAA6EA0C42BAF7EF0E048CF2 /* Project object */;
+}
