@@ -18,13 +18,13 @@ final class NavigationTests: XCTestCase {
             expectation(for: advanced, evaluatedWith: lyric)
             waitForExpectations(timeout: 12)
         }
-        let title = lyric.exists ? app.buttons["mini.open"] : app.descendants(matching: .any)["library.currentTitle"].firstMatch
-        XCTAssertTrue(title.waitForExistence(timeout: 5))
-        let first = title.label
         let flow = app.descendants(matching: .any)["library.coverflow"].firstMatch
+        XCTAssertTrue(flow.waitForExistence(timeout: 5))
+        let first = try XCTUnwrap(flow.value as? String)
+        XCTAssertFalse(first.isEmpty)
         flow.swipeLeft()
-        let changed = NSPredicate(format: "label != %@ AND label != ''", first)
-        expectation(for: changed, evaluatedWith: title)
+        let changed = NSPredicate(format: "value != %@ AND value != ''", first)
+        expectation(for: changed, evaluatedWith: flow)
         waitForExpectations(timeout: 5)
     }
 

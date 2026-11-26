@@ -137,6 +137,7 @@ import Foundation
             precondition(again.scripts.last?.exported?["id"] == "example1" && again.scripts.last?.name == "示例音源1")
             print("README example1 passed HTTP -> JSC -> URL with restored 320k and exported metadata")
         }
+        try await verifyBulk(store.deletingLastPathComponent(), base, preload)
         if CommandLine.arguments.contains("--live") {
             do { let list = try await SourceCatalog.chart(); print("QQ chart: \(list.1.count)") } catch { print("QQ chart: \(error.localizedDescription)") }
             let known = Song(id: "004IArbh3ytHgR", title: "稻香", artist: "周杰伦", platform: "tx")
@@ -151,19 +152,24 @@ import Foundation
 }
 SWIFT
 xcrun clang -fobjc-arc -c Runtime/CyMusicUserApiRuntime.m -o "$work/runtime.o"
-xcrun swiftc -import-objc-header Runtime/CyMusicUserApiRuntime.h -framework JavaScriptCore -framework Security "$work/runtime.o" ../App/Song.swift Catalog.swift PoolCatalog.swift PoolMatcher.swift ProviderSession.swift SourceEngine.swift "$work/Probe.swift" -o "$work/probe"
+cp BulkQueueProbe.swiftfixture "$work/BulkQueueProbe.swift"
+xcrun swiftc -import-objc-header Runtime/CyMusicUserApiRuntime.h -framework JavaScriptCore -framework Security "$work/runtime.o" ../App/Song.swift Catalog.swift PoolCatalog.swift PoolMatcher.swift ProviderSession.swift SourceEngine.swift ../Discovery/DownloadCenter.swift ../Playback/PlaybackMedia.swift "$work/BulkQueueProbe.swift" "$work/Probe.swift" -o "$work/probe"
 if [[ $# -gt 0 && " ${*} " == *" --example "* ]]; then
     curl --fail --silent --show-error --max-time 20 'https://raw.githubusercontent.com/gyc-12/CyMusic-ImportMusicApi-Example/643dc33cb38a2eb3f72ac11b171100dd10834603/example1.js' -o "$work/example1.js"
 fi
 python3 - "$work" "$@" <<'PY'
-import http.server, json, os, subprocess, sys, threading, time
+import io, wave, http.server, json, os, subprocess, sys, threading, time
 from pathlib import Path
 work = Path(sys.argv[1]).resolve()
-seen = []
+seen = []; times = []
+buf = io.BytesIO()
+with wave.open(buf, 'wb') as wav:
+    wav.setparams((1, 2, 8000, 0, 'NONE', '')); wav.writeframes(bytes(16000))
+
 class Endpoint(http.server.BaseHTTPRequestHandler):
     def log_message(self, *args): pass
     def do_GET(self):
-        seen.append(self.path)
+        seen.append(self.path); times.append(time.monotonic())
         base = f"http://127.0.0.1:{self.server.server_port}"
         if self.path == '/drip':
             self.send_response(200); self.send_header('Content-Type','audio/mpeg'); self.end_headers()
@@ -172,7 +178,15 @@ class Endpoint(http.server.BaseHTTPRequestHandler):
                     self.wfile.write(b'a'); self.wfile.flush(); time.sleep(0.2)
             except (BrokenPipeError, ConnectionResetError): pass
             return
-        if self.path == '/mid/320k':
+        if self.path == '/bulk/noheader':
+            self.send_error(429); return
+        if self.path == '/bulk/metadata' or (self.path == '/bulk/flac24bit' and seen.count(self.path) == 1):
+            self.send_response(429); self.send_header('Retry-After','7200' if self.path.endswith('metadata') else '3'); self.end_headers(); return
+        if self.path == '/bulk/flac24bit':
+            self.send_error(503); return
+        if self.path == '/bulk/flac':
+            body, mime = buf.getvalue(), 'audio/wav'
+        elif self.path == '/mid/320k':
             body, mime = json.dumps({'url':base+'/example-audio'}).encode(), 'application/json'
         elif self.path.startswith('/offline/'):
             if self.path == '/offline/profile': time.sleep(0.12)
@@ -192,5 +206,9 @@ with http.server.ThreadingHTTPServer(('127.0.0.1',0),Endpoint) as server:
         print('profile HTTP requests:', {p:seen.count(p) for p in sorted(set(seen))}); sys.exit(0)
     expected = ['/offline/flac','/offline/320k','/offline/128k','/media/mid/flac','/media/mid/320k','/media/mid/128k']
     assert seen[:9] == expected + expected[3:], seen
-    print('HTTP server verified exact retry order independently for resolution and download.')
+    bulk = [(p, t) for p,t in zip(seen,times) if p.startswith('/bulk/')]
+    assert [p for p,t in bulk] == ['/bulk/flac24bit','/bulk/flac24bit','/bulk/flac','/bulk/flac24bit','/bulk/flac','/bulk/metadata','/bulk/metadata'] + ['/bulk/noheader'] * 3, bulk
+    assert bulk[-1][1] - bulk[-2][1] >= 4 and bulk[-2][1] - bulk[-3][1] >= 2, bulk
+    assert bulk[1][1] - bulk[0][1] >= 3 and all(b[1]-a[1] >= .60 for a,b in zip(bulk[1:4],bulk[2:5])), bulk
+    print('HTTP server verified retry order, pacing, Retry-After deadline and no rotation on 429.')
 PY

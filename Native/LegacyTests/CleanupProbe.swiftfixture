@@ -1,0 +1,17 @@
+import Foundation
+@main struct Probe {
+ static func main() throws {
+    let fm = FileManager.default
+    let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? fm.removeItem(at: root) }
+    let docs=root.appendingPathComponent("docs"), support=root.appendingPathComponent("support")
+    let paths=["support/PlaybackCache/key/audio.flac","docs/musicCache/old.mp3","docs/download/music/nested/old.m4a","docs/importedLocalMusic/manual.mp3","docs/musicCache/index.json","docs/elsewhere/safe.mp3"]
+    for name in paths { let p=root.appendingPathComponent(name);try fm.createDirectory(at:p.deletingLastPathComponent(),withIntermediateDirectories:true);try Data([42]).write(to:p) }
+    try fm.createSymbolicLink(at:docs.appendingPathComponent("musicCache/link.mp3"),withDestinationURL:docs.appendingPathComponent("elsewhere/safe.mp3"))
+    let suite=UUID().uuidString, defaults=UserDefaults(suiteName:suite)!;defer {defaults.removePersistentDomain(forName:suite)}
+    let first=try DownloadedAudioCleanup.once(documents:docs,support:support,defaults:defaults);precondition(first==3)
+    for (n,name) in paths.enumerated(){precondition(fm.fileExists(atPath:root.appendingPathComponent(name).path)==(n>=3))}
+    try Data([12]).write(to:root.appendingPathComponent(paths[0]));let second=try DownloadedAudioCleanup.once(documents:docs,support:support,defaults:defaults);precondition(second==0 && fm.fileExists(atPath:root.appendingPathComponent(paths[0]).path))
+    print("PASS: only downloaded audio removed; manual import, metadata, symlink target and next-launch download retained")
+ }
+}

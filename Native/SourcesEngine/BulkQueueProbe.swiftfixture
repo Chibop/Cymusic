@@ -1,0 +1,73 @@
+import Foundation
+import Combine
+
+// The queue, JS runtime, network and cache writer are real. Only the library index
+// is isolated from the user's actual library in this macOS CLI fixture.
+@MainActor final class Library {
+    @Published var localSongs = [Song]()
+    var message: String?
+    func registerCache(_ song: Song, _ file: URL) {
+        var saved = song; saved.url = file
+        localSongs.removeAll { $0.id == song.id }; localSongs.append(saved)
+    }
+}
+
+@MainActor func verifyBulk(_ dir: URL, _ base: String, _ preload: URL) async throws {
+    let suffix = UUID().uuidString
+    var song = Song(id: suffix, title: "Fixture", artist: "Singer", platform: "apple", lyrics: "[00:01.00]Fixture line", album: "Album", duration: 182, isrc: "USAAA9900001")
+    var second = song; second.id += "-2"; second.title = "Second"; second.isrc = "USAAA9900002"
+    var alias = song; alias.id += "-alias"
+    let cleanup = [song, second, alias]
+    defer { for s in cleanup { try? FileManager.default.removeItem(at: PlaybackFiles.folder(s)) } }
+    let engine = SourceEngine(store: dir.appendingPathComponent("bulk-scripts"), preload: preload, matcher: { input in
+        var a = input; a.platform = "wy"; var b = a; b.platform = "kg"; return [a,b]
+    })
+    func resolver(_ platform: String, _ levels: [String], _ body: String) -> String {
+        "lx.on(lx.EVENT_NAMES.request, async ({info}) => { \(body) });lx.send(lx.EVENT_NAMES.inited,{sources:{\(platform):{type:'music',actions:['musicUrl'],qualitys:\(levels)}}});"
+    }
+    try await engine.importScript(resolver("wy", ["128k"], "return '\(base)/bulk/low';"), name: "Low")
+    try await engine.importScript(resolver("kg", ["flac24bit","flac"], "return '\(base)/bulk/'+info.type;"), name: "Best")
+    let library = Library(), journal = dir.appendingPathComponent("queue.json")
+    var queue: DownloadCenter? = DownloadCenter(engine: engine, library: library, journal: journal)
+    queue!.pause(); queue!.enqueueBest([song, song, alias, second]); precondition(queue!.pending.count == 3)
+    queue = nil
+    let restored = DownloadCenter(engine: engine, library: library, journal: journal)
+    precondition(restored.isPaused && restored.pending.count == 3); restored.resume()
+    let deadline = Date().addingTimeInterval(30)
+    while !restored.pending.isEmpty && deadline > Date() { try await Task.sleep(nanoseconds: 50_000_000) }
+    precondition(restored.pending.isEmpty && restored.failures.isEmpty, "queue: \(restored.failures)")
+    precondition(library.localSongs.count == 2 && library.localSongs.allSatisfy { $0.audioSource == "Best" && $0.quality == "flac" && $0.lyrics == song.lyrics })
+    precondition(restored.localFile(alias) == restored.localFile(song))
+    restored.enqueueBest([alias, second]); precondition(restored.pending.isEmpty)
+
+    // The script catches its own 429 and offers a fallback URL. The scope must
+    // still stop immediately, never accepting or requesting that fallback.
+    let lx = SourceEngine(store: dir.appendingPathComponent("throttle"), preload: preload, matcher: { _ in [] })
+    let js = "await new Promise(resolve=>lx.request('\(base)/bulk/metadata',{},()=>resolve()));return '\(base)/bulk/forbidden';"
+    try await lx.importScript(resolver("kg", ["flac24bit"], js), name: "Catches 429")
+    song.platform = "kg"
+    let scope = BulkHTTP(spacing: 0)
+    do {
+        _ = try await BulkHTTP.$current.withValue(scope) { try await lx.downloadBestMedia(song) { _ in fatalError("continued after metadata 429") } }
+        fatalError("swallowed 429")
+    } catch let err as BulkHTTP.Throttled { precondition(err.retryAfter == 7200) }
+    let q = DownloadCenter(engine: lx, library: Library(), journal: dir.appendingPathComponent("long-queue"))
+    song.id += "-throttle"; q.enqueueBest([song]); let limit = Date().addingTimeInterval(10)
+    while !q.isPaused && limit > Date() { try await Task.sleep(nanoseconds: 50_000_000) }
+    precondition(q.isPaused && q.pending.count == 1 && (q.retryAfter?.timeIntervalSinceNow ?? 0) > 7100)
+    q.resume(); try await Task.sleep(nanoseconds: 100_000_000); q.stop()
+    precondition(q.pending.isEmpty && q.retryAfter != nil)
+    // A missing header falls back to bounded exponential retries, then requires
+    // explicit resume. No other song is allowed to run ahead of the blocked head.
+    let fallback = SourceEngine(store: dir.appendingPathComponent("fallback-throttle"), preload: preload, matcher: { _ in [] })
+    try await fallback.importScript(resolver("kg", ["flac24bit"], "return '\(base)/bulk/noheader';"), name: "No header")
+    let stalled = DownloadCenter(engine: fallback, library: Library(), journal: dir.appendingPathComponent("stalled"))
+    var neverStarted = second; neverStarted.id += "-never-started"
+    stalled.enqueueBest([song, neverStarted]); let until = Date().addingTimeInterval(35)
+    while !stalled.isPaused && until > Date() { try await Task.sleep(nanoseconds: 50_000_000) }
+    precondition(stalled.isPaused && stalled.pending.count == 2); stalled.stop()
+    let dateHeader = HTTPURLResponse(url: URL(string: base)!, statusCode: 429, httpVersion: nil, headerFields: ["Retry-After":"Wed, 21 Oct 2099 07:28:00 GMT"])!
+    do { try BulkHTTP.$current.withValue(BulkHTTP()) { try BulkHTTP.check(dateHeader) }; fatalError("missed date") }
+    catch let err as BulkHTTP.Throttled { precondition((err.retryAfter ?? 0) > 120) }
+    print("Verified durable serial queue, cross-ID dedup, best tiers across services, fallback, media/metadata 429, resume and stop")
+}

@@ -1,70 +1,187 @@
 import Foundation
 import Combine
+import AVFoundation
+import UniformTypeIdentifiers
 
-/// App-owned queue: navigating away from a playlist does not cancel its transfers.
+/// One durable, foreground worker. The head remains in the journal until its
+/// file is indexed, so suspension and cancellation never discard unfinished work.
 @MainActor final class DownloadCenter: ObservableObject {
     struct Key: Hashable {
         let platform: String?
         let id: String
         init(_ song: Song) { platform = song.platform; id = song.id }
     }
+    private struct Job: Codable { let song: Song; let best: Bool; var retries = 0 }
+    private struct State: Codable { var jobs = [Job](); var paused = false; var after: Date? }
     private let engine: SourceEngine
     private let library: Library
-    private var queue: [Song] = []
+    private let journal: URL
+    private struct Recording: Hashable {
+        let title, artist: String
+        init(_ song: Song) { title = song.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(); artist = song.artist.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+    }
+    private var byID = [Key: Song]()
+    private var byRecording = [Recording: [Song]]()
+    private var observation: AnyCancellable?
+    private var state = State()
     private var worker: Task<Void, Never>?
     @Published private(set) var pending: Set<Key> = []
     @Published private(set) var failures: [Key: String] = [:]
     @Published private(set) var total = 0
+    @Published private(set) var isPaused = false
+    @Published private(set) var retryAfter: Date?
 
-    init(engine: SourceEngine, library: Library) { self.engine = engine; self.library = library }
+    init(engine: SourceEngine, library: Library, journal: URL? = nil) {
+        self.engine = engine; self.library = library
+        self.journal = journal ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Cymusic/download-queue.json")
+        do { state = try JSONDecoder().decode(State.self, from: Data(contentsOf: self.journal)) }
+        catch let e as CocoaError where e.code == .fileReadNoSuchFile { }
+        catch { library.message = error.localizedDescription }
+        pending = Set(state.jobs.map { Key($0.song) }); total = state.jobs.count
+        isPaused = state.paused; retryAfter = state.after
+        observation = library.$localSongs.sink { [weak self] songs in
+            self?.byID = Dictionary(songs.map { (Key($0), $0) }, uniquingKeysWith: { lhs, _ in lhs })
+            self?.byRecording = Dictionary(grouping: songs, by: Recording.init)
+        }
+        start()
+    }
 
+    private func persist() {
+        do {
+            try FileManager.default.createDirectory(at: journal.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try JSONEncoder().encode(state).write(to: journal, options: .atomic)
+        } catch { library.message = error.localizedDescription }
+    }
     private func valid(_ file: URL?) -> URL? {
         guard let file, file.isFileURL,
-              (try? FileManager.default.attributesOfItem(atPath: file.path)[.type] as? FileAttributeType) == .typeRegular else { return nil }
+              (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { return nil }
         return file
     }
     private func indexed(_ song: Song) -> URL? {
-        valid(library.localSongs.first { $0.id == song.id && $0.platform == song.platform }?.url)
+        valid(byID[Key(song)]?.url)
     }
     func localFile(_ song: Song) -> URL? {
-        indexed(song) ?? valid(song.url) ?? valid(PlaybackFiles.existing(song))
+        if let exact = indexed(song) ?? valid(song.url) ?? valid(PlaybackFiles.existing(song)) { return exact }
+        // Fast prefilter before the version/ISRC/duration/ambiguity checks.
+        let candidates = byRecording[Recording(song)] ?? []
+        return valid(PoolMatcher.match(song, in: candidates)?.url)
     }
-    func enqueue(_ songs: [Song]) {
-        var added = [Song]()
-        for song in songs {
+    func enqueue(_ songs: [Song]) { append(songs, best: false) }
+    func enqueueBest(_ songs: [Song]) { append(songs, best: true) }
+    private func append(_ songs: [Song], best: Bool) {
+        var added = 0
+        let fresh = state.jobs.isEmpty
+        for song in songs where !pending.contains(Key(song)) {
             let key = Key(song)
-            guard !pending.contains(key) else { continue }
+            failures[key] = nil
             if let file = localFile(song) {
-                if indexed(song) == nil { library.registerCache(song, file) }
+                // A cross-ID match already has a library row: don't create a second one.
+                if indexed(song) == nil && !library.localSongs.contains(where: { $0.url == file }) { library.registerCache(song, file) }
                 continue
             }
-            pending.insert(key); failures[key] = nil; added.append(song)
+            pending.insert(key); state.jobs.append(Job(song: song, best: best)); added += 1
         }
-        guard !added.isEmpty else { return }
-        total = (worker == nil ? 0 : total) + added.count
-        queue.append(contentsOf: added)
-        if worker == nil { worker = Task(priority: .utility) { await drain() } }
+        guard added > 0 else { return }
+        total = (fresh ? 0 : total) + added; persist(); start()
+    }
+    func pause() { isPaused = true; state.paused = true; persist(); worker?.cancel() }
+    func resume() {
+        isPaused = false; state.paused = false
+        if !state.jobs.isEmpty { state.jobs[0].retries = 0 }
+        persist(); start()
+    }
+    func stop() {
+        worker?.cancel(); state.jobs.removeAll(); pending.removeAll(); total = 0
+        isPaused = false; state.paused = false; persist() // Keep the server's cooldown.
+    }
+    private func start() {
+        guard worker == nil, !isPaused, !state.jobs.isEmpty else { return }
+        worker = Task(priority: .utility) { await drain() }
     }
     private func drain() async {
-        while !queue.isEmpty {
-            let song = queue.removeFirst(), key = Key(song)
-            defer { pending.remove(key) }
+        defer { worker = nil; start() }
+        while !Task.isCancelled, !isPaused, let job = state.jobs.first {
+            let key = Key(job.song)
             do {
-                if let file = localFile(song) {
-                    if indexed(song) == nil { library.registerCache(song, file) }
-                    continue
+                while let after = state.after, after > Date() {
+                    try await Task.sleep(nanoseconds: UInt64(min(60, max(0, after.timeIntervalSinceNow)) * 1e9))
                 }
-                let media = try await engine.downloadMedia(song) { source in
-                    try await PlaybackFiles.save(song, source: source)
+                try Task.checkCancellation()
+                state.after = nil; retryAfter = nil
+                // Also pace boundaries between two scopes/songs.
+                try await Task.sleep(nanoseconds: 650_000_000)
+                let scope = BulkHTTP()
+                try await BulkHTTP.$current.withValue(scope) { try await transfer(job, scope: scope) }
+                try Task.checkCancellation()
+                failures[key] = nil
+            } catch let error as BulkHTTP.Throttled {
+                // The whole queue stops at a 429, not just this script/quality.
+                // Long server deadlines are honored even across manual resume/relaunch.
+                let delay = max(error.retryAfter ?? 0, [2.0, 4.0, 8.0][min(job.retries, 2)])
+                state.after = Date().addingTimeInterval(delay); retryAfter = state.after
+                if !Task.isCancelled, !state.jobs.isEmpty {
+                    state.jobs[0].retries += 1
+                    if state.jobs[0].retries > 2 || delay > 120 {
+                        failures[key] = error.localizedDescription; state.paused = true; isPaused = true
+                    }
                 }
-                var saved = song
-                saved.audioSource = media.source; saved.quality = media.quality
-                if let lyrics = try? await SourceCatalog.lyrics(media.match),
-                   PlaybackLyric.parse(lyrics).contains(where: { $0.time != nil }) { saved.lyrics = lyrics }
-                library.registerCache(saved, media.url)
-                if indexed(song) == nil { throw CocoaError(.fileWriteUnknown) }
-            } catch { failures[key] = error.localizedDescription }
+                persist(); continue
+            } catch {
+                guard !Task.isCancelled else { return }
+                failures[key] = error.localizedDescription
+            }
+            pending.remove(key); state.jobs.removeFirst(); persist()
         }
-        worker = nil
+    }
+    /// PlaybackFiles' legacy transfer API discards the response headers. Preserve
+    /// its cache layout and audio validation, but inspect this *same* GET (no probe).
+    nonisolated static func saveQueued(_ song: Song, from source: URL) async throws -> URL {
+        if let existing = PlaybackFiles.existing(song) { return existing }
+        guard ProviderSession.webURL(source.absoluteString) != nil, source.pathExtension.lowercased() != "m3u8" else { throw PlaybackFiles.CacheError.unsupported }
+        let (temp, response) = try await URLSession.shared.download(from: source)
+        defer { try? FileManager.default.removeItem(at: temp) }
+        try BulkHTTP.check(response)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode), http.statusCode != 206 else { throw URLError(.badServerResponse) }
+        let mime = response.mimeType ?? ""
+        guard !mime.contains("mpegurl"), !mime.hasPrefix("text/") else { throw PlaybackFiles.CacheError.unsupported }
+        let extensions = ["mp3", "m4a", "mp4", "aac", "flac", "wav", "aiff", "aif", "caf", "alac", "ogg", "opus"]
+        let ext = [response.url?.pathExtension, source.pathExtension, UTType(mimeType: mime)?.preferredFilenameExtension]
+            .compactMap { $0?.lowercased() }.first(where: extensions.contains) ?? "mp3"
+        var folder = PlaybackFiles.folder(song)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var values = URLResourceValues(); values.isExcludedFromBackup = true; try folder.setResourceValues(values)
+        let stage = folder.appendingPathComponent(UUID().uuidString).appendingPathExtension(ext)
+        try FileManager.default.moveItem(at: temp, to: stage)
+        defer { try? FileManager.default.removeItem(at: stage) }
+        guard try await !AVURLAsset(url: stage).loadTracks(withMediaType: .audio).isEmpty else { throw PlaybackFiles.CacheError.unsupported }
+        try Task.checkCancellation()
+        if let existing = PlaybackFiles.existing(song) { return existing }
+        let file = folder.appendingPathComponent("audio").appendingPathExtension(ext)
+        try FileManager.default.moveItem(at: stage, to: file)
+        return file
+    }
+    private func transfer(_ job: Job, scope: BulkHTTP) async throws {
+        let song = job.song
+        if let file = localFile(song) {
+            if indexed(song) == nil && !library.localSongs.contains(where: { $0.url == file }) { library.registerCache(song, file) }
+            return
+        }
+        let save: (URL) async throws -> URL = { source in
+            try await scope.pace()
+            return try await Self.saveQueued(song, from: source)
+        }
+        let media = job.best ? try await engine.downloadBestMedia(song, save: save) : try await engine.downloadMedia(song, save: save)
+        var saved = song
+        saved.audioSource = media.source; saved.quality = media.quality
+        // Lyrics are optional. A lyric 429 still governs the next queued item.
+        if !PlaybackLyric.parse(saved.lyrics).contains(where: { $0.time != nil }) {
+            do {
+                try await scope.pace()
+                if let lyrics = try await SourceEngine.downloadLyrics(media.match), PlaybackLyric.parse(lyrics).contains(where: { $0.time != nil }) { saved.lyrics = lyrics }
+            } catch { /* Preserve the validated audio even if metadata fails. */ }
+        }
+        library.registerCache(saved, media.url)
+        try scope.check()
+        guard indexed(song) != nil else { throw CocoaError(.fileWriteUnknown) }
     }
 }

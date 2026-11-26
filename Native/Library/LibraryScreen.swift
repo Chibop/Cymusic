@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 
 private struct ShelfAlbum: Identifiable {
   let id: String, title: String, artist: String, tracks: [Song]
-  var art: URL? { tracks.lazy.compactMap(\.artwork).first }
+  let art: URL?
   @MainActor static func collect(_ library: Library, songs: [Song]) -> [Self] {
     func key(_ s: String) -> String {
       s.trimmingCharacters(in: .whitespacesAndNewlines).folding(
@@ -20,7 +20,7 @@ private struct ShelfAlbum: Identifiable {
       let s = sorted[0]
       return Self(
         id: key, title: s.album ?? "Unknown Album", artist: s.albumArtist ?? s.artist,
-        tracks: sorted)
+        tracks: sorted, art: sorted.lazy.compactMap { library.albumArtwork(for: $0) }.first)
     }.sorted {
       $0.title == $1.title
         ? $0.id < $1.id : $0.title.localizedStandardCompare($1.title) == .orderedAscending
@@ -142,6 +142,7 @@ struct LibraryScreen: View {
           .accessibilityIdentifier("library.shuffle")
       }
     }
+    .onChange(of: library.artworkRevision) { _ in refreshShelf() }
     .onChange(of: library.localSongs) { _ in refreshShelf() }
     .onChange(of: collection.tracks(in: library)) { _ in refreshShelf() }
     .onChange(of: collection) { _ in
@@ -196,7 +197,9 @@ struct LibraryScreen: View {
     selected = albums.firstIndex { $0.id == oldID } ?? min(selected, max(0, albums.count - 1))
   }
   private func display(_ side: CGFloat) -> some View {
-    VStack(spacing: 0) {
+    let art = inQueue ? playback.current?.artwork : album?.art
+    let title = inQueue ? playback.current?.title : album?.title
+    return VStack(spacing: 0) {
       HStack {
         Text(inQueue ? String(localized: "Now Playing") : collection.title(in: library)).fontWeight(
           .bold)
@@ -208,42 +211,10 @@ struct LibraryScreen: View {
       .background(.regularMaterial)
       .overlay(alignment: .bottom) { Divider() }
       if count > 0 {
-        ZStack {
-          Color.black.zIndex(-10)
-          ForEach(max(0, focus - 3)..<min(count, focus + 4), id: \.self) { i in
-            let d = i - focus
-            let a = CGFloat(abs(d))
-            let size = side * 0.51
-            let art = inQueue ? playback.queue[i].artwork : albums[i].art
-            let title = inQueue ? playback.queue[i].title : albums[i].title
-            VStack(spacing: 1) {
-              Jacket(art: art, title: title).frame(width: size, height: size)
-              Jacket(art: art, title: title).frame(width: size, height: size).scaleEffect(y: -1)
-                .mask(
-                  LinearGradient(
-                    stops: [
-                      .init(color: .white.opacity(0.26), location: 0),
-                      .init(color: .clear, location: 0.32),
-                    ], startPoint: .top, endPoint: .bottom))
-            }.frame(width: size, height: size, alignment: .top)
-              .rotation3DEffect(
-                .degrees(reduceMotion || d == 0 ? 0 : (d > 0 ? -57 : 57)), axis: (0, 1, 0),
-                perspective: 0.7
-              )
-              .scaleEffect(d == 0 ? 1 : 0.78).offset(
-                x: d == 0 ? 0 : (d > 0 ? 1 : -1) * side * (0.32 + (a - 1) * 0.12)
-              )
-              .zIndex(-Double(a)).accessibilityHidden(true)
-          }
-        }.clipped().animation(reduceMotion ? nil : .easeOut(duration: 0.23), value: focus)
-          .contentShape(Rectangle()).onTapGesture { center() }
-          .gesture(
-            DragGesture(minimumDistance: 22).onEnded {
-              if abs($0.translation.width) > abs($0.translation.height) {
-                step($0.translation.width < 0 ? 1 : -1)
-              }
-            }
-          )
+        CoverFlowShelf(count: count, focus: focus, reduceMotion: reduceMotion, step: step, activate: center) { i in
+          Jacket(art: inQueue ? playback.queue[i].artwork : albums[i].art,
+                 title: inQueue ? playback.queue[i].title : albums[i].title)
+        }
           .accessibilityElement(children: .ignore).accessibilityLabel("Cover Flow")
           .accessibilityValue(inQueue ? playback.current?.title ?? "" : album?.title ?? "")
           .accessibilityAdjustableAction { step($0 == .increment ? 1 : -1) }.accessibilityAction {
@@ -261,7 +232,7 @@ struct LibraryScreen: View {
               Text(verbatim: badge).font(.caption2.monospaced()).foregroundStyle(Color(white: 0.76))
             }
           }.lineLimit(1).padding(.horizontal, 8).padding(.bottom, 12).foregroundStyle(.white)
-        }
+        }.frame(minHeight: min(80, side * 0.24)).layoutPriority(1)
       } else {
         Spacer()
         Image(systemName: "music.note.list").font(.largeTitle)
@@ -270,7 +241,7 @@ struct LibraryScreen: View {
         Spacer()
       }
     }.foregroundStyle(.white).frame(width: max(1, side - 12), height: max(1, side - 12)).background(
-      .black
+      CoverFlowBackdrop(art: art, title: title ?? "")
     ).clipShape(RoundedRectangle(cornerRadius: 5)).padding(6)
       .background(RoundedRectangle(cornerRadius: 10).fill(Color(white: 0.14))).overlay(
         RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(0.7), lineWidth: 1))
@@ -280,41 +251,121 @@ struct LibraryScreen: View {
 private struct ShelfCaption<Metadata: View>: View {
   let raw: String?, elapsed: Double
   @ViewBuilder var metadata: () -> Metadata
-  private var lines: [PlaybackLyric] { ShelfLyrics.lines(raw) }
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   var body: some View {
-    Group {
-      if let line = lines.last(where: { ($0.time ?? .infinity) <= elapsed }) {
-        Text(verbatim: line.text).font(.headline).lineLimit(2).multilineTextAlignment(.center)
-          .padding(.horizontal, 12).padding(.bottom, 12).accessibilityIdentifier("library.lyric")
-      } else {
-        metadata()
-      }
+    let lines = ShelfLyrics.lines(raw)
+    if let index = ShelfLyrics.index(at: elapsed, in: lines), !lines[index].text.isEmpty {
+      let line = lines[index]
+      ZStack {
+        VStack(spacing: 2) {
+          neighbor(index > 0 ? lines[index - 1].text : "", id: "library.lyric.previous")
+          Text(attributed(line)).font(.subheadline.weight(.semibold)).lineLimit(1)
+            .accessibilityLabel(Text(verbatim: line.text)).accessibilityIdentifier("library.lyric")
+          neighbor(index + 1 < lines.count ? lines[index + 1].text : "", id: "library.lyric.next")
+        }.id(index).transition(.opacity)
+      }.animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: index)
+        .padding(.horizontal, 10).padding(.bottom, 6)
+    } else {
+      metadata()
     }
+  }
+
+  @ViewBuilder private func neighbor(_ text: String, id: String) -> some View {
+    if text.isEmpty {
+      Text(verbatim: " ").font(.caption2).hidden().accessibilityHidden(true)
+    } else {
+      Text(verbatim: text).font(.caption2).lineLimit(1)
+        .foregroundStyle(Color(white: 0.67)).accessibilityIdentifier(id)
+    }
+  }
+
+  private func attributed(_ line: ShelfLyrics.Line) -> AttributedString {
+    guard !line.parts.isEmpty else { return AttributedString(line.text) }
+    let active = line.activePart(at: elapsed)
+    var result = AttributedString()
+    for (i, part) in line.parts.enumerated() {
+      var run = AttributedString(part.text)
+      run.foregroundColor = i == active ? .white : Color(white: 0.70)
+      result.append(run)
+    }
+    return result
   }
 }
 
-@MainActor private enum ShelfLyrics {
-  // Playback ticks only select a line; parse again only when the lyric source changes.
-  private static var previous: String?
-  private static var parsed: [PlaybackLyric] = []
-  static func lines(_ raw: String?) -> [PlaybackLyric] {
-    guard let raw else { return [] }
-    if raw != previous {
-      previous = raw
-      parsed = PlaybackLyric.parse(raw).filter { $0.time != nil }
+// Independent of SwiftUI so timestamp and seek boundaries can be tested numerically.
+enum ShelfLyrics {
+  struct Part { let time: Double?, text: String }
+  struct Line {
+    let time: Double, text: String, parts: [Part]
+    func activePart(at elapsed: Double) -> Int? {
+      guard let i = parts.lastIndex(where: { ($0.time ?? .infinity) <= elapsed }),
+        !parts[i].text.isEmpty else { return nil }
+      return i
     }
+  }
+  private static let lineStamp = try! NSRegularExpression(pattern: #"\[(\d+):([0-5]?\d)(?:[.:](\d+))?\]"#)
+  private static let wordStamp = try! NSRegularExpression(pattern: #"<(\d+):([0-5]?\d)(?:[.:](\d+))?>"#)
+  private static let adjustment = try! NSRegularExpression(pattern: #"(?i)\[offset:\s*([+-]?\d+)\s*\]"#)
+  @MainActor private static var cache: (String, [Line])?
+  @MainActor static func lines(_ raw: String?) -> [Line] {
+    guard let raw else { return [] }
+    if let cache, cache.0 == raw { return cache.1 }
+    let parsed = parse(raw)
+    cache = (raw, parsed)
     return parsed
+  }
+
+  // Return the latest cue at or before the clock, including on a backward seek.
+  static func index(at elapsed: Double, in lines: [Line]) -> Int? {
+    var low = 0, high = lines.count
+    while low < high {
+      let mid = low + (high - low) / 2
+      if lines[mid].time <= elapsed { low = mid + 1 } else { high = mid }
+    }
+    return low > 0 ? low - 1 : nil
+  }
+
+  static func parse(_ raw: String) -> [Line] {
+    let source = raw as NSString
+    let offset = adjustment.firstMatch(in: raw, range: NSRange(location: 0, length: source.length))
+      .flatMap { Double(source.substring(with: $0.range(at: 1))) } ?? 0
+    // Keep milliseconds until the final conversion to avoid offset subtraction jitter at boundaries.
+    func millis(_ match: NSTextCheckingResult, _ s: NSString) -> Double {
+      let minute = Double(s.substring(with: match.range(at: 1))) ?? 0
+      let second = Double(s.substring(with: match.range(at: 2))) ?? 0
+      let fraction = match.range(at: 3)
+      let digits = fraction.location == NSNotFound ? "" : s.substring(with: fraction)
+      return minute * 60_000 + second * 1_000 + (Double("0." + digits) ?? 0) * 1_000
+    }
+    var lines: [Line] = []
+    for row in raw.components(separatedBy: .newlines) {
+      let s = row as NSString, range = NSRange(location: 0, length: (row as NSString).length)
+      let stamps = lineStamp.matches(in: row, range: range)
+      guard let first = stamps.first, let last = stamps.last else { continue }
+      let body = s.substring(from: NSMaxRange(last.range)).trimmingCharacters(in: .whitespaces)
+      let b = body as NSString
+      let tags = wordStamp.matches(in: body, range: NSRange(location: 0, length: b.length))
+      var runs: [(Double?, String)] = []
+      if let tag = tags.first, tag.range.location > 0 { runs.append((nil, b.substring(to: tag.range.location))) }
+      for (i, tag) in tags.enumerated() {
+        let start = NSMaxRange(tag.range), end = i + 1 < tags.count ? tags[i + 1].range.location : b.length
+        runs.append((millis(tag, b), b.substring(with: NSRange(location: start, length: end - start))))
+      }
+      let text = tags.isEmpty ? body : runs.map { $0.1 }.joined()
+      let times = runs.compactMap { $0.0 }
+      let ordered = zip(times, times.dropFirst()).allSatisfy { $0 <= $1 }
+      for stamp in stamps {
+        let start = millis(stamp, s), shift = start - millis(first, s) - offset
+        let parts = ordered ? runs.map { Part(time: $0.0.map { ($0 + shift) / 1000 }, text: $0.1) } : []
+        lines.append(Line(time: max(0, (start - offset) / 1000), text: text, parts: parts))
+      }
+    }
+    return lines.sorted { $0.time < $1.time }
   }
 }
 
 private struct Jacket: View {
   let art: URL?, title: String
-  private static let cache: NSCache<NSURL, UIImage> = {
-    let c = NSCache<NSURL, UIImage>()
-    c.countLimit = 32
-    c.totalCostLimit = 36 * 1024 * 1024
-    return c
-  }()
   @State private var loaded: UIImage?
   var body: some View {
     GeometryReader { g in
@@ -323,8 +374,7 @@ private struct Jacket: View {
           width: g.size.width, height: g.size.height
         ).clipped()
       } else {
-        let hues: [Double] = [0.51, 0.02, 0.11, 0.63, 0.76, 0.31]
-        let hue = hues[title.utf8.reduce(0) { ($0 + Int($1)) % hues.count }]
+        let hue = CoverFlowArtwork.fallbackHue(title)
         ZStack {
           Color(hue: hue, saturation: 0.43, brightness: 0.74)
           Canvas { context, size in
@@ -349,18 +399,10 @@ private struct Jacket: View {
           }.padding(g.size.width * 0.07).frame(maxWidth: .infinity, alignment: .leading)
         }.clipped()
       }
-    }.clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous)).task(id: art) {
+    }.clipped().task(id: art) {
       loaded = nil
-      guard let art, art.isFileURL else { return }
-      if let hit = Self.cache.object(forKey: art as NSURL) {
-        loaded = hit
-        return
-      }
-      let img = await Task.detached(priority: .utility) { UIImage(contentsOfFile: art.path) }.value
-      guard !Task.isCancelled, let img else { return }
-      Self.cache.setObject(
-        img, forKey: art as NSURL, cost: Int(img.size.width * img.size.height * 4))
-      loaded = img
+      guard let art, let sample = await CoverFlowArtwork.shared.sample(art), !Task.isCancelled else { return }
+      loaded = sample.image
     }
   }
 }
@@ -455,11 +497,32 @@ private struct AlbumDetail: View {
   let album: ShelfAlbum
   let play: ([Song], Int) -> Void
   @State private var removing: Song?
+  @EnvironmentObject private var downloads: DownloadCenter
+  @State private var catalog: [Song] = []
+  @State private var selectedMissing: String?
+  @State private var artwork: ArtworkSelection?
+  private var key: AlbumCatalogKey? {
+    guard let key = AlbumCatalogKey(album.tracks.first?.album, album.artist),
+      album.tracks.allSatisfy(key.contains)
+    else { return nil }
+    return key
+  }
   var body: some View {
-    let tracks = library.localTracks(album.tracks.map(\.id))
+    let local =
+      key.map { key in
+        library.localSongs.filter(key.contains).sorted {
+          let a = library.trackOrder($0)
+          let b = library.trackOrder($1)
+          return a != b ? a < b : $0.title.localizedStandardCompare($1.title) == .orderedAscending
+        }
+      } ?? library.localTracks(album.tracks.map(\.id))
+    let rows = AlbumCatalogRow.merge(local: local, catalog: catalog)
+    let tracks = rows.filter(\.owned).map(\.song)
     ScrollView {
       VStack(spacing: 9) {
-        Jacket(art: album.art, title: album.title).aspectRatio(1, contentMode: .fit).clipShape(
+        Jacket(art: tracks.lazy.compactMap { library.albumArtwork(for: $0) }.first, title: album.title).aspectRatio(
+          1, contentMode: .fit
+        ).clipShape(
           RoundedRectangle(cornerRadius: 9)
         ).shadow(color: .black.opacity(0.16), radius: 15, y: 9).frame(maxWidth: 268).padding(
           .bottom, 12)
@@ -478,41 +541,58 @@ private struct AlbumDetail: View {
             Label("随机播放", systemImage: "shuffle").frame(maxWidth: .infinity, minHeight: 32)
           }
         }.disabled(tracks.isEmpty).buttonStyle(.bordered).tint(.pink).padding(.vertical, 12)
-        ForEach(Array(tracks.enumerated()), id: \.element.id) { i, song in
+        ForEach(Array(rows.enumerated()), id: \.element.id) { i, row in
+          let song = row.song
           Divider()
-          Button {
-            play(tracks, i)
-          } label: {
-            HStack(spacing: 12) {
-              Text("\(library.trackOrder(song).1 == Int.max ? i+1 : library.trackOrder(song).1)")
+          if row.owned {
+            Button {
+              if let index = tracks.firstIndex(where: { $0.id == song.id }) { play(tracks, index) }
+            } label: {
+              HStack(spacing: 12) {
+                Text(
+                  "\(library.trackOrder(song).1 == Int.max ? (row.number ?? i+1) : library.trackOrder(song).1)"
+                )
                 .font(.subheadline.monospacedDigit()).foregroundStyle(.secondary).frame(
                   minWidth: 20)
-              VStack(alignment: .leading, spacing: 3) {
-                Text(verbatim: song.title).font(.body)
-                if let q = song.quality {
-                  Label(q, systemImage: "waveform").font(.caption2).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 3) {
+                  Text(verbatim: song.title).font(.body)
+                  if let q = song.quality {
+                    Label(q, systemImage: "waveform").font(.caption2).foregroundStyle(.secondary)
+                  }
                 }
+                Spacer()
+                if let t = song.duration, t.isFinite, t >= 0 {
+                  Text(String(format: "%d:%02d", Int(t) / 60, Int(t) % 60)).font(
+                    .caption.monospacedDigit()
+                  ).foregroundStyle(.secondary)
+                }
+              }.padding(.vertical, 5).frame(minHeight: 42).contentShape(Rectangle())
+            }.buttonStyle(.plain).contextMenu {
+              Button(library.isFavorite(song) ? "Remove from favorites" : "Add to favorites") {
+                library.favorite(song)
               }
-              Spacer()
-              if let t = song.duration, t.isFinite, t >= 0 {
-                Text(String(format: "%d:%02d", Int(t) / 60, Int(t) % 60)).font(
-                  .caption.monospacedDigit()
-                ).foregroundStyle(.secondary)
+              Button("Delete cached track", role: .destructive) { removing = song }
+              Button("Replace song artwork") { artwork = ArtworkSelection(song, album: false) }
+              ForEach(library.playlists) { list in
+                Button(list.name) { library.add(song, to: list.id) }
               }
-            }.padding(.vertical, 5).frame(minHeight: 42).contentShape(Rectangle())
-          }.buttonStyle(.plain).contextMenu {
-            Button(library.isFavorite(song) ? "Remove from favorites" : "Add to favorites") {
-              library.favorite(song)
             }
-            Button("Delete cached track", role: .destructive) { removing = song }
-            ForEach(library.playlists) { list in
-              Button(list.name) { library.add(song, to: list.id) }
-            }
+          } else {
+            missingRow(song, number: row.number ?? i + 1)
           }
         }
       }.padding(.horizontal, 20).padding(.bottom, 28).frame(maxWidth: 640).frame(
         maxWidth: .infinity)
     }.modifier(CacheRemoval(song: $removing)).toolbar {
+      if let seed = tracks.first {
+        ToolbarItem(placement: .navigationBarLeading) {
+          Menu {
+            Button("Replace album artwork") { artwork = ArtworkSelection(seed, album: true) }
+          } label: {
+            Label("Album actions", systemImage: "ellipsis.circle")
+          }
+        }
+      }
       ToolbarItem(placement: .confirmationAction) {
         Button {
           dismiss()
@@ -520,7 +600,55 @@ private struct AlbumDetail: View {
           Image(systemName: "xmark.circle.fill")
         }.accessibilityLabel("关闭")
       }
-    }
+    }.sheet(item: $artwork) { ArtworkPickerSheet(seed: $0.song, albumMode: $0.album) }
+      .task(id: key) {
+        catalog = []
+        guard let key else { return }
+        let result = await AlbumCatalog.shared.tracks(for: key)
+        if !Task.isCancelled { catalog = result }
+      }
+  }
+
+  private func missingRow(_ song: Song, number: Int) -> some View {
+    let key = DownloadCenter.Key(song)
+    let pending = downloads.pending.contains(key)
+    return HStack(spacing: 0) {
+      Button {
+        selectedMissing = song.id
+      } label: {
+        HStack(spacing: 12) {
+          Text("\(number)").font(.subheadline.monospacedDigit()).frame(minWidth: 20)
+          VStack(alignment: .leading, spacing: 3) {
+            Text(verbatim: song.title)
+            if let reason = downloads.failures[key] { Text(verbatim: reason).font(.caption2) }
+          }
+          Spacer()
+        }.frame(minHeight: 44).contentShape(Rectangle())
+      }.accessibilityAddTraits(selectedMissing == song.id ? .isSelected : [])
+      Button {
+        selectedMissing = song.id
+        downloads.enqueue([song])
+      } label: {
+        Group {
+          if pending {
+            ProgressView()
+          } else {
+            Image(systemName: "arrow.down.circle").font(.title3)
+          }
+        }.frame(width: 44, height: 44)
+      }.disabled(pending).accessibilityLabel("Download \(song.title)")
+    }.buttonStyle(.plain).foregroundStyle(.secondary)
+      .background(
+        selectedMissing == song.id ? Color.secondary.opacity(0.1) : .clear,
+        in: RoundedRectangle(cornerRadius: 6))
+  }
+}
+
+private struct ArtworkSelection: Identifiable {
+  let id = UUID(), song: Song, album: Bool
+  init(_ song: Song, album: Bool) {
+    self.song = song
+    self.album = album
   }
 }
 
@@ -601,6 +729,7 @@ private struct CollectionsView: View {
 
 private struct LibraryTracks: View {
   @EnvironmentObject var library: Library
+  @State private var artwork: Song?
   let queue: [Song]
   let playlist: UUID?
   let play: ([Song], Int) -> Void
@@ -631,6 +760,7 @@ private struct LibraryTracks: View {
             }
           }
           Button("Delete cached track", role: .destructive) { removing = song }
+          Button("Replace song artwork") { artwork = song }
           if let playlist {
             Button("Remove from playlist", role: .destructive) {
               library.remove(song, from: playlist)
@@ -641,6 +771,6 @@ private struct LibraryTracks: View {
         }
         .accessibilityLabel("Actions for \(song.title)")
       }
-    }
+    }.sheet(item: $artwork) { ArtworkPickerSheet(seed: $0, albumMode: false) }
   }
 }

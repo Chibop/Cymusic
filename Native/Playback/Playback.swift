@@ -428,6 +428,11 @@ enum PlaybackMode: String, CaseIterable {
       if self?.current.map(PlaybackFiles.folder) == key { self?.caching = false }
     }
   }
+  func refreshArtwork(_ lookup: (Song) -> URL?) {
+    for i in queue.indices { if let art = lookup(queue[i]) { queue[i].artwork = art } }
+    guard let song = current, let art = lookup(song), art != song.artwork else { return }
+    current?.artwork = art; artworkTask?.cancel(); fetchArt(art, generation)
+  }
   private func fetchArt(_ url: URL?, _ token: UUID) {
     guard let url else { return }
     artworkTask = Task { [weak self] in

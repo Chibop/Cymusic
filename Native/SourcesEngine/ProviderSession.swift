@@ -6,16 +6,57 @@ struct SourceFailure: LocalizedError {
     init(_ message: String) { errorDescription = message }
 }
 
+/// A bulk job owns one of these scopes. A script or matcher may catch a network
+/// error; latch the first 429 so it cannot silently advance to another provider.
+final class BulkHTTP: @unchecked Sendable {
+    struct Throttled: LocalizedError {
+        let retryAfter: TimeInterval?
+        var errorDescription: String? { "服务请求过于频繁 (HTTP 429)" }
+    }
+    @TaskLocal static var current: BulkHTTP?
+    private let lock = NSLock()
+    private var throttled: Throttled?
+    private var next = Date.distantPast
+    let spacing: TimeInterval
+    init(spacing: TimeInterval = 0.65) { self.spacing = spacing }
+
+    static func check(_ response: URLResponse) throws {
+        guard let scope = current, let http = response as? HTTPURLResponse, http.statusCode == 429 else { return }
+        let value = http.value(forHTTPHeaderField: "Retry-After")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        let seconds = Double(value).flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+        let delay = seconds ?? formatter.date(from: value).map { max(0, $0.timeIntervalSinceNow) }
+        let error = Throttled(retryAfter: delay.map { min($0, Date.distantFuture.timeIntervalSinceNow) })
+        scope.lock.withLock { scope.throttled = error }; throw error
+    }
+    func check() throws {
+        try Task.checkCancellation()
+        if let error = lock.withLock({ throttled }) { throw error }
+    }
+    func pace() async throws {
+        try check()
+        let slot = lock.withLock { let slot = max(Date(), next); next = slot.addingTimeInterval(spacing); return slot }
+        while slot.timeIntervalSinceNow > 0 {
+            try await Task.sleep(nanoseconds: UInt64(min(1, max(0, slot.timeIntervalSinceNow)) * 1e9))
+        }
+        try check()
+    }
+}
+
 actor ProviderSession {
     private let preload: URL?
     private var runtime: CyMusicUserApiRuntime!
     private var generation = ""
     private var pending = [String: CheckedContinuation<SourceJSON, Error>]()
+    private var bulkRequestInFlight = false
     private var http = [String: Task<Void, Never>]()
     private let network = URLSession(configuration: .ephemeral)
     private var capabilities = [String: SourceJSON]()
 
-    init(preload: URL?) { self.preload = preload }
+    private let bulk: BulkHTTP?
+    init(preload: URL?) { self.preload = preload; bulk = BulkHTTP.current }
 
     private func start() {
         runtime = CyMusicUserApiRuntime(preload: preload) { [weak self] event in
@@ -77,13 +118,16 @@ actor ProviderSession {
         }
     }
 
-    func qualities(for song: Song, preferred: SourceEngine.Quality) -> [String] {
+    func qualities(for song: Song, preferred: SourceEngine.Quality, best: Bool = false) -> [String] {
         guard let capability = capabilities[Self.platform(song)],
               (capability["actions"] as? [String])?.contains("musicUrl") == true else { return [] }
         let supported = capability["qualitys"] as? [String] ?? []
+        if best { return Self.bestLevels.filter(supported.contains) }
         let order: [SourceEngine.Quality] = [.lossless, .standard, .low]
         return order.drop(while: { $0 != preferred }).map(\.rawValue).filter(supported.contains)
     }
+
+    static let bestLevels = ["flac24bit", "flac", "320k", "128k"]
 
     var routes: [String: [String]] { capabilities.mapValues { $0["actions"] as? [String] ?? [] } }
 
@@ -158,7 +202,7 @@ actor ProviderSession {
             http[key] = Task {
                 defer { http.removeValue(forKey: key) }
                 do {
-                    let response = try await fetch(data)
+                    let response = try await BulkHTTP.$current.withValue(bulk) { try await fetch(data) }
                     send("response", ["requestKey": key, "error": NSNull(), "response": response])
                 } catch { if Task.isCancelled { return }; send("response", ["requestKey": key, "error": error.localizedDescription, "response": NSNull()]) }
             }
@@ -168,6 +212,13 @@ actor ProviderSession {
 
     private func fetch(_ data: SourceJSON) async throws -> SourceJSON {
         guard let text = data["url"] as? String, let url = Self.webURL(text) else { throw URLError(.badURL) }
+        // LX scripts may issue parallel requests, even within a single song.
+        // Serialize their actual HTTP operations in bulk mode only.
+        if let bulk {
+            while bulkRequestInFlight { try bulk.check(); try await Task.sleep(nanoseconds: 50_000_000) }
+            try bulk.check(); bulkRequestInFlight = true
+        }
+        defer { if bulk != nil { bulkRequestInFlight = false } }
         let options = data["options"] as? SourceJSON ?? [:]
         var request = URLRequest(url: url)
         request.timeoutInterval = min(5, max(1, (options["timeout"] as? Double ?? 5_000) / 1000))
@@ -184,7 +235,9 @@ actor ProviderSession {
             else if let text = options["body"] as? String { request.httpBody = Data(text.utf8) }
             else if let body = options["body"] { request.httpBody = try JSONSerialization.data(withJSONObject: body, options: .fragmentsAllowed) }
         }
+        try await bulk?.pace()
         let (bytes, raw) = try await network.data(for: request)
+        try BulkHTTP.check(raw)
         guard let response = raw as? HTTPURLResponse else { throw URLError(.badServerResponse) }
         let body: Any
         if options["binary"] as? Bool == true { body = bytes.base64EncodedString() }

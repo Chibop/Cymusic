@@ -173,6 +173,26 @@ struct SourceScript: Codable, Identifiable {
         try await pooled(song, scripts: scripts, quality: quality, accept: save)
     }
 
+    func downloadBestMedia(_ song: Song, save: @escaping (URL) async throws -> URL) async throws -> Media {
+        try await pooled(song, scripts: scripts, quality: .lossless, best: true, accept: save)
+    }
+
+    /// Use only the ID of the verified match (never a fuzzy title-only lyric).
+    nonisolated static func downloadLyrics(_ match: Song) async throws -> String? {
+        if let text = match.lyrics, !text.isEmpty { return text }
+        let service = ProviderSession.platform(match)
+        if service == "tx" { return try await SourceCatalog.lyrics(match) }
+        guard service == "wy", let id = Int64(match.id), id > 0 else { return nil }
+        var parts = URLComponents(string: "https://music.163.com/api/song/lyric")!
+        parts.queryItems = [URLQueryItem(name: "id", value: match.id), URLQueryItem(name: "lv", value: "1")]
+        guard let url = parts.url else { return nil }
+        let (data, response) = try await URLSession.shared.data(for: URLRequest(url: url, timeoutInterval: 10))
+        try BulkHTTP.check(response)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+              let row = try JSONSerialization.jsonObject(with: data) as? SourceJSON else { return nil }
+        return (row["lrc"] as? SourceJSON)?["lyric"] as? String
+    }
+
     // Resource timeout is wall time; an inactivity timeout alone resets on each byte.
     private nonisolated static let probeNetwork: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
@@ -204,19 +224,21 @@ struct SourceScript: Codable, Identifiable {
         return url
     }
 
-    private func pooled(_ song: Song, scripts: [SourceScript], quality: Quality,
+    private func pooled(_ song: Song, scripts: [SourceScript], quality: Quality, best: Bool = false,
                         accept: @escaping (URL) async throws -> URL) async throws -> Media {
         try Task.checkCancellation()
         let key = MatchKey(song), version = revision
         var last: Error = SourceFailure(scripts.isEmpty ? "请先导入音源" : "没有可用的匹配音源")
-        if let url = song.url, url.isFileURL || ProviderSession.webURL(url.absoluteString) != nil {
+        func direct() async throws -> Media? {
+            guard let url = song.url, url.isFileURL || ProviderSession.webURL(url.absoluteString) != nil else { return nil }
             do {
                 let accepted = try await accept(url)
                 try Task.checkCancellation()
                 return (accepted, song, song.audioSource ?? (url.isFileURL ? "本地文件" : "直连"), song.quality)
             }
-            catch { try Task.checkCancellation(); last = error }
+            catch { try BulkHTTP.current?.check(); try Task.checkCancellation(); last = error; return nil }
         }
+        if !best || scripts.isEmpty || song.url?.isFileURL == true, let media = try await direct() { return media }
         guard !scripts.isEmpty else { throw last }
         var sessions = [String: ProviderSession](), failed = Set<String>(), seen = Set<[String]>()
         func load(_ item: SourceScript) async throws -> ProviderSession? {
@@ -224,20 +246,22 @@ struct SourceScript: Codable, Identifiable {
             if let session = sessions[item.id] { return session }
             guard !failed.contains(item.id) else { return nil }
             let session = ProviderSession(preload: preload)
-            do { _ = try await session.load(item); sessions[item.id] = session; return session }
-            catch { await session.close(); try Task.checkCancellation(); failed.insert(item.id); last = error; return nil }
+            do { _ = try await session.load(item); try BulkHTTP.current?.check(); sessions[item.id] = session; return session }
+            catch { await session.close(); try BulkHTTP.current?.check(); try Task.checkCancellation(); failed.insert(item.id); last = error; return nil }
         }
-        func attempt(_ candidate: Song) async throws -> Media? {
-            guard seen.insert([ProviderSession.platform(candidate), candidate.id]).inserted else { return nil }
+        func attempt(_ candidate: Song, exact: String? = nil) async throws -> Media? {
+            guard seen.insert([ProviderSession.platform(candidate), candidate.id, exact ?? ""]).inserted else { return nil }
             let platform = ProviderSession.platform(candidate)
             let compatible = scripts.filter { $0.routes?[platform]?.contains("musicUrl") ?? ($0.routes == nil) }
             let winner = winners[platform]
             for item in compatible.filter({ $0.id == winner }) + compatible.filter({ $0.id != winner }) {
                 try Task.checkCancellation()
                 guard let session = try await load(item) else { continue }
-                for level in await session.qualities(for: candidate, preferred: quality) {
+                for level in await session.qualities(for: candidate, preferred: quality, best: best) where exact == nil || level == exact {
                     do {
+                        try await BulkHTTP.current?.pace()
                         let url = try await session.requestURL(candidate, quality: level)
+                        try BulkHTTP.current?.check()
                         try Task.checkCancellation()
                         let accepted = try await accept(url)
                         try Task.checkCancellation()
@@ -251,12 +275,54 @@ struct SourceScript: Codable, Identifiable {
                             }
                         }
                         return (accepted, candidate, item.name, level)
-                    } catch { try Task.checkCancellation(); last = error }
+                    } catch { try BulkHTTP.current?.check(); try Task.checkCancellation(); last = error }
                 }
             }
             return nil
         }
+        func discover() async throws -> [Song] {
+            var found = [Song]()
+            for item in scripts where item.routes?.values.contains(where: { $0.contains("search") }) ?? true {
+                guard let session = try await load(item) else { continue }
+                for platform in await session.searchPlatforms {
+                    do { try await BulkHTTP.current?.pace(); found += try await session.search(song, platform: platform) }
+                    catch { last = error }
+                    try Task.checkCancellation(); try BulkHTTP.current?.check()
+                }
+            }
+            do {
+                if let matcher { found += try await matcher(song) }
+                else {
+                    // Serial catalog lookups for bulk jobs, not PoolMatcher’s parallel fan-out.
+                    for service in ["tx", "wy"] where scripts.contains(where: { $0.routes?[service]?.contains("musicUrl") ?? ($0.routes == nil) }) {
+                        try await BulkHTTP.current?.pace()
+                        do { found += try await PoolMatcher.candidates(for: song, services: [service]) }
+                        catch { last = error }
+                        try Task.checkCancellation(); try BulkHTTP.current?.check()
+                    }
+                }
+            } catch { last = error }
+            try Task.checkCancellation(); try BulkHTTP.current?.check()
+            return found
+        }
         func run() async throws -> Media {
+            if best {
+                var candidates = [song] + [matches[key]].compactMap { $0 }
+                var discovered = false
+                // Work down a single quality ladder across all matched catalogs
+                // and scripts. Never repeat metadata searches at lower tiers.
+                for level in ProviderSession.bestLevels {
+                    for candidate in candidates { if let media = try await attempt(candidate, exact: level) { return media } }
+                    if !discovered {
+                        discovered = true
+                        let extra = try await discover()
+                        candidates += extra
+                        for candidate in extra { if let media = try await attempt(candidate, exact: level) { return media } }
+                    }
+                }
+                if let media = try await direct() { return media }
+                throw last
+            }
             if let result = try await attempt(song) { return result }
             if let remembered = matches[key] {
                 if let result = try await attempt(remembered) { return result }
@@ -267,7 +333,7 @@ struct SourceScript: Codable, Identifiable {
                 for platform in await session.searchPlatforms {
                     let hits: [Song]
                     do { hits = try await session.search(song, platform: platform) }
-                    catch { try Task.checkCancellation(); last = error; continue }
+                    catch { try BulkHTTP.current?.check(); try Task.checkCancellation(); last = error; continue }
                     for hit in hits { if let result = try await attempt(hit) { return result } }
                 }
             }

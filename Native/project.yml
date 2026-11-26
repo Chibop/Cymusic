@@ -8,8 +8,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.5.0"
-    CURRENT_PROJECT_VERSION: 4
+    MARKETING_VERSION: "1.6.0"
+    CURRENT_PROJECT_VERSION: 5
     TARGETED_DEVICE_FAMILY: "1,2"
     GENERATE_INFOPLIST_FILE: YES
     CODE_SIGN_STYLE: Automatic
@@ -19,13 +19,14 @@ targets:
     platform: iOS
     sources:
       - App
+      - AppleLibrary
       - Library
       - path: Discovery
         excludes: [".fixtures/**"]
       - Localization
       - Playback
       - path: SourcesEngine
-        excludes: ["README.md", "verify-engine.sh", "Runtime/user-api-preload.js"]
+        excludes: ["README.md", "verify-engine.sh", "*.swiftfixture", "Runtime/user-api-preload.js"]
       - path: SourcesEngine/Runtime/user-api-preload.js
         buildPhase: resources
       - Share/Host

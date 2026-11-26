@@ -27,10 +27,13 @@ final class Library: ObservableObject {
     var supportPaths: [String: String]?
     var media: [String: DiskMedia]?
     var cachedArt: [String: String]?
+    var albumArtwork: [String: String]?
+    var songArtwork: [String: String]?
   }
 
   @Published private var store = Store()
   @Published private(set) var localSongs: [Song] = []
+  @Published private(set) var artworkRevision = 0
   private var indexing = false
   private var needsIndex = false
   @Published var message: String?
@@ -120,7 +123,59 @@ final class Library: ObservableObject {
     return ids.compactMap { lookup[$0].map(resolved) }
   }
 
-  private func resolved(_ song: Song) -> Song {
+  // Use the shelf’s album + album artist identity, including tags read from disk.
+  func albumArtworkKey(for song: Song) -> String {
+    let media = store.media?[song.id]
+    return [media?.album ?? song.album ?? "", media?.albumArtist ?? song.albumArtist ?? media?.artist ?? song.artist]
+      .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX")) }
+      .joined(separator: "\u{0}")
+  }
+
+  private func coverFile(_ path: String?) -> URL? {
+    guard let path else { return nil }
+    let url = index.deletingLastPathComponent().appendingPathComponent(path)
+    return FileManager.default.fileExists(atPath: url.path) ? url : nil
+  }
+
+  // The album shelf must not inherit the first track’s independent override.
+  func albumArtwork(for song: Song) -> URL? {
+    coverFile(store.albumArtwork?[albumArtworkKey(for: song)]) ?? coverFile(store.media?[song.id]?.cover)
+      ?? coverFile(store.cachedArt?[song.id]) ?? store.songs.first { $0.id == song.id }?.artwork
+  }
+
+  func artworkOverride(for song: Song) -> URL? {
+    coverFile(store.songArtwork?[song.id]) ?? coverFile(store.albumArtwork?[albumArtworkKey(for: song)])
+  }
+
+  func replaceArtwork(for song: Song, albumMode: Bool, data: Data) async throws {
+    guard loadFailure == nil else { throw CocoaError(.fileReadCorruptFile) }
+    let base = index.deletingLastPathComponent()
+    let path = try await Task.detached(priority: .userInitiated) {
+      guard data.count <= 12_000_000, let src = CGImageSourceCreateWithData(data as CFData, nil),
+        CGImageSourceGetStatus(src) == .statusComplete,
+        let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
+        let width = props[kCGImagePropertyPixelWidth] as? Int, let height = props[kCGImagePropertyPixelHeight] as? Int,
+        (64...8192).contains(width), (64...8192).contains(height),
+        let path = DiskMedia.saveCover(data, key: "replacement:" + SHA256.hash(data: data).description, directory: base)
+      else { throw CocoaError(.fileReadCorruptFile) }
+      return path
+    }.value
+    try Task.checkCancellation()
+    var next = store
+    if albumMode {
+      if next.albumArtwork == nil { next.albumArtwork = [:] }
+      next.albumArtwork?[albumArtworkKey(for: song)] = path
+    } else {
+      if next.songArtwork == nil { next.songArtwork = [:] }
+      next.songArtwork?[song.id] = path
+    }
+    guard save(next) else { throw CocoaError(.fileWriteUnknown) }
+    artworkRevision &+= 1
+  }
+
+  private func resolved(_ original: Song) -> Song {
+    var song = original
+    song.artwork = artworkOverride(for: song) ?? song.artwork
     guard let path = store.documentsPaths[song.id] else { return song }
     let local = documents.appendingPathComponent(path)
     guard FileManager.default.fileExists(atPath: local.path) || song.url == nil else { return song }
@@ -193,6 +248,7 @@ final class Library: ObservableObject {
         }
       }
       // Cover Flow must work without fetching either art or catalog results.
+      song.artwork = artworkOverride(for: song) ?? song.artwork
       if song.artwork?.isFileURL != true { song.artwork = nil }
       return song
     }
@@ -264,6 +320,7 @@ final class Library: ObservableObject {
     var next = store
     if let i = next.songs.firstIndex(where: { $0.id == song.id }) {
       var updated = song
+      if song.artwork == artworkOverride(for: song), song.artwork != nil { updated.artwork = next.songs[i].artwork }
       updated.lyrics = song.lyrics ?? next.songs[i].lyrics
       if updated.url?.isFileURL != false, next.songs[i].url?.isFileURL == false {
         updated.url = next.songs[i].url
@@ -602,7 +659,7 @@ private struct DiskMedia: Codable {
     else { return nil }
     return saveCover(data, key: remote.absoluteString, directory: directory)
   }
-  private static func saveCover(_ data: Data, key: String, directory: URL) -> String? {
+  fileprivate static func saveCover(_ data: Data, key: String, directory: URL) -> String? {
     guard let source = CGImageSourceCreateWithData(data as CFData, nil),
       let image = CGImageSourceCreateThumbnailAtIndex(
         source, 0,

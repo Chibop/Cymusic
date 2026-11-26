@@ -13,6 +13,7 @@ enum SourceCatalog {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
         let (data, response) = try await URLSession.shared.data(for: request)
+        try BulkHTTP.check(response)
         guard let response = response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else { throw SourceFailure("目录服务暂不可用") }
         guard let json = try? JSONSerialization.jsonObject(with: data) as? SourceJSON else { throw SourceFailure("目录服务返回了无法读取的数据") }
         return json
