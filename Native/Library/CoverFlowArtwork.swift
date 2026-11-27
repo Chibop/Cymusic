@@ -48,7 +48,14 @@ actor CoverFlowArtwork {
     let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
       kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceShouldCacheImmediately: true,
       kCGImageSourceThumbnailMaxPixelSize: 800]
-    guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+    // ImageIO preserves aspect ratio and applies EXIF orientation. Clip the resulting
+    // pixels without rescaling: the face, its reflection, the SwiftUI jacket and the
+    // tint sampler should all see exactly the same centered square.
+    guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+    let side = min(thumbnail.width, thumbnail.height)
+    let crop = CGRect(x: (thumbnail.width - side) / 2, y: (thumbnail.height - side) / 2,
+                      width: side, height: side)
+    guard let image = thumbnail.cropping(to: crop) else { return nil }
     var pixels = [UInt8](repeating: 0, count: 32 * 32 * 4)
     let rendered = pixels.withUnsafeMutableBytes { buffer -> Bool in
       guard let context = CGContext(data: buffer.baseAddress, width: 32, height: 32, bitsPerComponent: 8,
