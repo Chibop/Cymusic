@@ -81,19 +81,23 @@ actor CoverFlowArtwork {
 
 struct CoverFlowBackdrop: View {
   let art: URL?, title: String
-  @State private var sampled: (URL, Color)?
+  @State private var paper = Color(white: 0.32)
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
   var body: some View {
-    let tint = sampled?.0 == art ? sampled?.1 : nil
     ZStack {
-      Color.black
-      LinearGradient(colors: [.white.opacity(0.10), .white.opacity(0.025)], startPoint: .top, endPoint: .bottom)
-      LinearGradient(colors: [.white.opacity(0.55), .white.opacity(0.24), .white.opacity(0.07)],
-                     startPoint: .topLeading, endPoint: .bottomTrailing)
-        .colorMultiply(tint ?? Color(hue: CoverFlowArtwork.fallbackHue(title), saturation: 0.48, brightness: 0.56))
-    }.task(id: art) {
-      guard let art, let sample = await CoverFlowArtwork.shared.sample(art), !Task.isCancelled else { return }
-      withAnimation(reduceMotion ? nil : .easeOut(duration: 0.22)) { sampled = (art, Color(sample.color)) }
+      Color(red: 16/255, green: 20/255, blue: 18/255)
+      paper.opacity(0.61)
+      LinearGradient(stops: [.init(color: .white.opacity(0.07), location: 0),
+                             .init(color: .black.opacity(0.039), location: 0.52),
+                             .init(color: .black.opacity(1/3), location: 1)],
+                     startPoint: UnitPoint(x: 0.46, y: 0), endPoint: UnitPoint(x: 0.54, y: 1))
+    }.task(id: SleeveItem(art: art, title: title)) {
+      let sample: CoverFlowArtwork.Sample?
+      if let art { sample = await CoverFlowArtwork.shared.sample(art) } else { sample = nil }
+      guard !Task.isCancelled else { return }
+      let color = sample.map { Color($0.color) } ?? Color(hue: CoverFlowArtwork.fallbackHue(title), saturation: 0.48, brightness: 0.56)
+      withAnimation(reduceMotion ? nil : .timingCurve(0.25, 0.1, 0.25, 1, duration: 0.58)) { paper = color }
     }.accessibilityHidden(true)
   }
 }

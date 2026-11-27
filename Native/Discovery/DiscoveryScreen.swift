@@ -70,8 +70,6 @@ struct DiscoveryScreen: View {
                         }.padding(.vertical, 3)
                     }
                 }
-            } header: {
-                Text(verbatim: platform == .apple ? (zh ? "Apple Music · 中国大陆新发现" : "Apple Music · China mainland New") : platform == .qq ? (zh ? "QQ 音乐 · 编辑推荐" : "QQ Music · Editor picks") : (zh ? "网易云音乐 · 精品歌单" : "NetEase · Featured playlists"))
             } footer: { Text(zh ? "平台公开发布的精选歌单，非个人推荐。" : "Published selections, not personalized recommendations.") }
         }.id(platform).navigationTitle(zh ? "发现" : "Discover")
     }

@@ -1,4 +1,43 @@
 import Foundation
+import AVFoundation
+
+/// Inspect the encoded audio track. Apple catalog timings and requested download tiers
+/// can differ from the recording that was actually saved.
+struct AppleLocalAudio {
+    let quality: String?
+    let duration: String?
+
+    static func read(_ url: URL) async -> Self {
+        let asset = AVURLAsset(url: url)
+        let seconds = try? await asset.load(.duration).seconds
+        let duration = seconds.flatMap { value -> String? in
+            guard value.isFinite, value > 0, value < Double(Int32.max) else { return nil }
+            let total = Int(value.rounded())
+            return String(format: "%d:%02d", total / 60, total % 60)
+        }
+        guard let track = try? await asset.loadTracks(withMediaType: .audio).first,
+              let format = try? await track.load(.formatDescriptions).first,
+              let stream = CMAudioFormatDescriptionGetStreamBasicDescription(format)?.pointee else {
+            return Self(quality: nil, duration: duration)
+        }
+        let codec: String?
+        switch stream.mFormatID {
+        case kAudioFormatLinearPCM: codec = "PCM"
+        case kAudioFormatFLAC: codec = "FLAC"
+        case kAudioFormatAppleLossless: codec = "ALAC"
+        case kAudioFormatMPEGLayer3: codec = "MP3"
+        case kAudioFormatMPEG4AAC, kAudioFormatMPEG4AAC_HE, kAudioFormatMPEG4AAC_HE_V2: codec = "AAC"
+        default:
+            var four = stream.mFormatID.bigEndian
+            codec = withUnsafeBytes(of: &four) { String(bytes: $0, encoding: .ascii)?.trimmingCharacters(in: .whitespaces) }
+        }
+        let bitrate = try? await track.load(.estimatedDataRate)
+        let parts = [codec, stream.mBitsPerChannel > 0 ? "\(stream.mBitsPerChannel)-bit" : nil,
+                     stream.mSampleRate > 0 ? String(format: "%g kHz", stream.mSampleRate / 1000) : nil,
+                     bitrate.flatMap { $0.isFinite && $0 > 0 ? String(format: "%.0f kbps", $0 / 1000) : nil }].compactMap { $0 }
+        return Self(quality: parts.isEmpty ? nil : parts.joined(separator: " · "), duration: duration)
+    }
+}
 
 /// Metadata only: intentionally no asset URL, artwork, account, or playback history.
 struct AppleLibraryTrack: Codable, Identifiable {

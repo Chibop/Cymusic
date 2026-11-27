@@ -74,8 +74,9 @@ struct LibraryScreen: View {
   private var focus: Int { inQueue ? playback.index : selected }
   private func step(_ n: Int) {
     guard count > 0 else { return }
+    let next = min(count - 1, max(0, focus + n))
+    guard next != focus else { return }
     UISelectionFeedbackGenerator().selectionChanged()
-    let next = (focus + n % count + count) % count
     if inQueue { playback.select(next) } else { selected = next }
   }
   private func center() {
@@ -147,9 +148,7 @@ struct LibraryScreen: View {
           .accessibilityIdentifier("library.shuffle")
       }
     }
-    .onChange(of: library.artworkRevision) { _ in refreshShelf() }
-    .onChange(of: library.localSongs) { _ in refreshShelf() }
-    .onChange(of: collection.tracks(in: library)) { _ in refreshShelf() }
+    .onChange(of: library.shelfRevision) { _ in refreshShelf() }
     .onChange(of: collection) { _ in
       selected = 0
       refreshShelf()
@@ -227,7 +226,7 @@ struct LibraryScreen: View {
 
   private func shelf(activate: @escaping () -> Void) -> some View {
     CoverFlowShelf(count: count, focus: focus, reduceMotion: reduceMotion, step: step, activate: activate) { i in
-      Jacket(art: inQueue ? playback.queue[i].artwork : albums[i].art,
+      SleeveItem(art: inQueue ? playback.queue[i].artwork : albums[i].art,
              title: inQueue ? playback.queue[i].title : albums[i].title)
     }
       .accessibilityElement(children: .ignore).accessibilityLabel("Cover Flow")

@@ -236,7 +236,7 @@ globalThis.lx_setup = (key, id, name, description, version, author, homepage, ra
             break
           case 'search':
             if (!Array.isArray(response)) throw new Error('Expected search results')
-            result = { source: data.source, action: data.action, data: response.slice(0, 50).map(({id,title,artist}) => ({id:String(id ?? ''),title,artist})) }
+            result = { source: data.source, action: data.action, data: response.slice(0, 50).map(({id,title,artist,album,albumArtist,duration,isrc,artwork,lyrics}) => ({id:String(id ?? ''),title,artist,album,albumArtist,duration,isrc,artwork,lyrics})) }
             break
           case 'lyric':
             result = {

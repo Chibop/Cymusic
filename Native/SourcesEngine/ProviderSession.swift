@@ -135,20 +135,33 @@ actor ProviderSession {
         capabilities.keys.filter { (capabilities[$0]?["actions"] as? [String])?.contains("search") == true }.sorted()
     }
 
-    // Opt-in LX extension: search({keyword,title,artist}) returns [{id,title,artist}].
-    func search(_ song: Song, platform: String) async throws -> [Song] {
+    // Discovery sends a free-text keyword. Recording matching additionally sends
+    // title and artist and applies its stricter identity checks after parsing.
+    func search(keyword: String, platform: String) async throws -> [Song] {
+        try await searchRows(info: ["keyword": keyword], platform: platform)
+    }
+
+    private func searchRows(info: [String: String], platform: String) async throws -> [Song] {
+        guard searchPlatforms.contains(platform) else { throw SourceFailure("此平台未声明搜索能力") }
         let key = UUID().uuidString
-        let info = ["keyword": "\(song.title) \(song.artist)", "title": song.title, "artist": song.artist]
         let response = try await wait(key, seconds: 4) {
             send("request", ["requestKey": key, "data": ["action": "search", "source": platform, "info": info]])
         }
         let rows = (response["result"] as? SourceJSON)?["data"] as? [SourceJSON] ?? []
-        let candidates: [Song] = rows.compactMap { row in
-            guard let id = row["id"] as? String, !id.isEmpty, let title = row["title"] as? String,
+        return rows.compactMap { row in
+            guard let id = row["id"] as? String, !id.isEmpty, let title = row["title"] as? String, !title.isEmpty,
                   let artist = row["artist"] as? String else { return nil }
-            return Song(id: id, title: title, artist: artist, platform: platform, album: row["album"] as? String,
-                        duration: (row["duration"] as? NSNumber)?.doubleValue, isrc: row["isrc"] as? String)
+            let duration = (row["duration"] as? NSNumber)?.doubleValue
+            return Song(id: id, title: title, artist: artist, artwork: (row["artwork"] as? String).flatMap(Self.webURL),
+                        platform: platform, lyrics: row["lyrics"] as? String, album: row["album"] as? String,
+                        albumArtist: row["albumArtist"] as? String, duration: duration.flatMap { $0.isFinite && $0 > 0 ? $0 : nil },
+                        isrc: row["isrc"] as? String)
         }
+    }
+
+    func search(_ song: Song, platform: String) async throws -> [Song] {
+        let info = ["keyword": "\(song.title) \(song.artist)", "title": song.title, "artist": song.artist]
+        let candidates = try await searchRows(info: info, platform: platform)
         if song.album != nil || song.duration != nil || song.isrc != nil {
             return PoolMatcher.match(song, in: candidates).map { [$0] } ?? []
         }

@@ -74,7 +74,7 @@ struct SourceScript: Codable, Identifiable {
     private var winners = [String: String]() // service -> last accepted script
     private var revision = 0
     private let store: URL
-    private let preload: URL?
+    let preload: URL?
     private let matcher: ((Song) async throws -> [Song])?
 
     init(store: URL? = nil, preload: URL? = Bundle.main.url(forResource: "user-api-preload", withExtension: "js"),
@@ -173,8 +173,8 @@ struct SourceScript: Codable, Identifiable {
         try await pooled(song, scripts: scripts, quality: quality, accept: save)
     }
 
-    func downloadBestMedia(_ song: Song, save: @escaping (URL) async throws -> URL) async throws -> Media {
-        try await pooled(song, scripts: scripts, quality: .lossless, best: true, accept: save)
+    func downloadBestMedia(_ song: Song, routes: [String: Set<String>]? = nil, save: @escaping (URL) async throws -> URL) async throws -> Media {
+        try await pooled(song, scripts: scripts, quality: .lossless, best: true, routes: routes, accept: save)
     }
 
     /// Use only the ID of the verified match (never a fuzzy title-only lyric).
@@ -224,13 +224,24 @@ struct SourceScript: Codable, Identifiable {
         return url
     }
 
-    private func pooled(_ song: Song, scripts: [SourceScript], quality: Quality, best: Bool = false,
+    private func pooled(_ song: Song, scripts installed: [SourceScript], quality: Quality, best: Bool = false,
+                        routes: [String: Set<String>]? = nil,
                         accept: @escaping (URL) async throws -> URL) async throws -> Media {
         try Task.checkCancellation()
+        let pin = song.searchScriptID
+        let native = ProviderSession.platform(song)
+        func permits(_ id: String, _ platform: String) -> Bool {
+            (pin == nil || (pin == id && native == platform)) && (routes == nil || routes?[id]?.contains(platform) == true)
+        }
+        if let pin, !installed.contains(where: { $0.id == pin }) { throw SourceFailure("搜索结果的音源已移除") }
+        let scripts = installed.filter { item in
+            (pin == nil || item.id == pin) && (routes == nil || routes?[item.id]?.isEmpty == false)
+        }
+        if routes != nil && scripts.isEmpty { throw SourceFailure("没有已选择的可用下载音源") }
         let key = MatchKey(song), version = revision
         var last: Error = SourceFailure(scripts.isEmpty ? "请先导入音源" : "没有可用的匹配音源")
         func direct() async throws -> Media? {
-            guard let url = song.url, url.isFileURL || ProviderSession.webURL(url.absoluteString) != nil else { return nil }
+            guard pin == nil, routes == nil, let url = song.url, url.isFileURL || ProviderSession.webURL(url.absoluteString) != nil else { return nil }
             do {
                 let accepted = try await accept(url)
                 try Task.checkCancellation()
@@ -252,7 +263,7 @@ struct SourceScript: Codable, Identifiable {
         func attempt(_ candidate: Song, exact: String? = nil) async throws -> Media? {
             guard seen.insert([ProviderSession.platform(candidate), candidate.id, exact ?? ""]).inserted else { return nil }
             let platform = ProviderSession.platform(candidate)
-            let compatible = scripts.filter { $0.routes?[platform]?.contains("musicUrl") ?? ($0.routes == nil) }
+            let compatible = scripts.filter { permits($0.id, platform) && ($0.routes?[platform]?.contains("musicUrl") ?? ($0.routes == nil)) }
             let winner = winners[platform]
             for item in compatible.filter({ $0.id == winner }) + compatible.filter({ $0.id != winner }) {
                 try Task.checkCancellation()
@@ -284,17 +295,17 @@ struct SourceScript: Codable, Identifiable {
             var found = [Song]()
             for item in scripts where item.routes?.values.contains(where: { $0.contains("search") }) ?? true {
                 guard let session = try await load(item) else { continue }
-                for platform in await session.searchPlatforms {
+                for platform in await session.searchPlatforms where permits(item.id, platform) {
                     do { try await BulkHTTP.current?.pace(); found += try await session.search(song, platform: platform) }
                     catch { last = error }
                     try Task.checkCancellation(); try BulkHTTP.current?.check()
                 }
             }
             do {
-                if let matcher { found += try await matcher(song) }
+                if let matcher, routes == nil { found += try await matcher(song) }
                 else {
                     // Serial catalog lookups for bulk jobs, not PoolMatcher’s parallel fan-out.
-                    for service in ["tx", "wy"] where scripts.contains(where: { $0.routes?[service]?.contains("musicUrl") ?? ($0.routes == nil) }) {
+                    for service in ["tx", "wy"] where scripts.contains(where: { permits($0.id, service) && ($0.routes?[service]?.contains("musicUrl") ?? ($0.routes == nil)) }) {
                         try await BulkHTTP.current?.pace()
                         do { found += try await PoolMatcher.candidates(for: song, services: [service]) }
                         catch { last = error }
@@ -306,6 +317,10 @@ struct SourceScript: Codable, Identifiable {
             return found
         }
         func run() async throws -> Media {
+            if pin != nil {
+                if let result = try await attempt(song) { return result }
+                throw last
+            }
             if best {
                 var candidates = [song] + [matches[key]].compactMap { $0 }
                 var discovered = false

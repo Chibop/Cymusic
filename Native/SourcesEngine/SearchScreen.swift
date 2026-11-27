@@ -1,151 +1,117 @@
 import SwiftUI
 
 struct SearchScreen: View {
-    @State private var input = ""
-    @State private var kind: PoolCatalog.Kind = .songs
-    @State private var result: PoolCatalog.Results?
-    @State private var busy = false
-    @State private var error: String?
-    @State private var task: Task<Void, Never>?
-
-    var body: some View {
-        List {
-            Picker("搜索类型", selection: $kind) {
-                ForEach(PoolCatalog.Kind.allCases) { Text($0.rawValue).tag($0) }
-            }.pickerStyle(.segmented)
-            if busy { ProgressView("正在获取目录") }
-            if let error {
-                Text(error).foregroundStyle(.secondary)
-                Button("重试") { search() }
-            }
-            if let result { CatalogSearchResults(result: result, kind: kind) }
-        }
-        .navigationTitle("搜索")
-        .searchable(text: $input, prompt: "歌曲、专辑或艺人")
-        .onSubmit(of: .search) { search() }
-        .onChange(of: input) { _ in task?.cancel(); busy = false; result = nil; error = nil }
-        .onDisappear { task?.cancel(); busy = false }
-    }
-
-    private func search() {
-        task?.cancel()
-        let term = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !term.isEmpty else { return }
-        result = nil
-        error = nil
-        busy = true
-        task = Task { @MainActor in
-            defer { if !Task.isCancelled { busy = false } }
-            do {
-                let response = try await PoolCatalog.search(term)
-                try Task.checkCancellation()
-                result = response
-            } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
-        }
-    }
-}
-
-private struct CatalogSearchResults: View {
     @EnvironmentObject private var engine: SourceEngine
     @EnvironmentObject private var playback: Playback
     @EnvironmentObject private var library: Library
-    let result: PoolCatalog.Results
-    let kind: PoolCatalog.Kind
-
-    var body: some View {
-        Section {
-            switch kind {
-            case .songs:
-                if result.songs.isEmpty { Text("没有找到歌曲").foregroundStyle(.secondary) }
-                else {
-                    if engine.scripts.isEmpty {
-                        Text("音源池为空。可以浏览目录，播放或下载前请在设置里导入音源。")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    }
-                    ForEach(result.songs.indices, id: \.self) { index in
-                        let song = result.songs[index]
-                        Button { playback.play(result.songs, index: index) } label: {
-                            HStack {
-                                CatalogArtwork(url: song.artwork, symbol: "music.note")
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(song.title).font(.headline)
-                                    Text(song.artist).font(.subheadline).foregroundStyle(.secondary)
-                                    if let album = song.album { Text(album).font(.caption).foregroundStyle(.secondary) }
-                                    if let duration = song.duration {
-                                        Text(Duration.seconds(duration), format: .time(pattern: .minuteSecond))
-                                            .font(.caption).foregroundStyle(.secondary)
-                                    }
-                                }.lineLimit(2)
-                                Spacer()
-                                Text(song.platform == "tx" ? "QQ 音乐" : song.platform == "wy" ? "网易云音乐" : result.origin)
-                                    .font(.caption2).padding(5).background(.thinMaterial, in: Capsule())
-                            }.contentShape(Rectangle())
-                        }.buttonStyle(.plain)
-                        .swipeActions { Button("收藏") { library.favorite(song) } }
-                    }
-                }
-            case .albums, .artists:
-                let entries = kind == .albums ? result.albums : result.artists
-                if entries.isEmpty { Text(kind == .albums ? "没有找到专辑" : "没有找到艺人").foregroundStyle(.secondary) }
-                ForEach(entries) { entry in
-                    NavigationLink {
-                        CatalogSearchDetail(entry: entry, kind: kind)
-                    } label: {
-                        HStack {
-                            CatalogArtwork(url: entry.artwork, symbol: kind == .artists ? "person.fill" : "square.stack")
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(entry.title).font(.headline)
-                                Text(entry.subtitle).font(.subheadline).foregroundStyle(.secondary)
-                                if !entry.metadata.isEmpty { Text(entry.metadata).font(.caption).foregroundStyle(.secondary) }
-                            }.lineLimit(2)
-                        }
-                    }
-                }
-            }
-        } header: { Text(result.origin) }
-    }
-}
-
-private struct CatalogArtwork: View {
-    let url: URL?
-    let symbol: String
-
-    var body: some View {
-        AsyncImage(url: url) { $0.resizable().scaledToFill() } placeholder: {
-            Image(systemName: symbol).frame(maxWidth: .infinity, maxHeight: .infinity).background(.quaternary)
-        }
-        .frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 6))
-    }
-}
-
-private struct CatalogSearchDetail: View {
-    let entry: PoolCatalog.Entry
-    let kind: PoolCatalog.Kind
-    @State private var result: PoolCatalog.Results?
-    @State private var error: String?
+    @EnvironmentObject private var downloads: DownloadCenter
+    @State private var input = ""
+    @State private var scriptID: String?
+    @State private var platforms = [String]()
+    @State private var selected = Set<String>()
+    @State private var loadingPlatforms = false
+    @State private var platformError: String?
+    @State private var result: ScopedSearchResults?
     @State private var busy = false
-    @State private var attempt = 0
+    @State private var error: String?
+    @State private var task: Task<Void, Never>?
+    @FocusState private var editing: Bool
+
+    private var script: SourceScript? { engine.scripts.first { $0.id == scriptID } }
+    private var canSearch: Bool {
+        script != nil && !selected.isEmpty && !loadingPlatforms && !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     var body: some View {
         List {
             Section {
-                Text(entry.subtitle).foregroundStyle(.secondary)
-                if !entry.metadata.isEmpty { Text(entry.metadata).font(.subheadline).foregroundStyle(.secondary) }
-            } header: { Text(entry.context.origin) }
-            if busy { ProgressView(kind == .artists ? "正在获取艺人发行" : "正在获取专辑曲目") }
-            if let error {
-                Text(error).foregroundStyle(.secondary)
-                Button("重试") { attempt += 1 }
+                HStack {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("输入关键词", text: $input).focused($editing).submitLabel(.search).onSubmit { search() }
+                }
+                Picker("音源脚本", selection: $scriptID) {
+                    Text("请选择").tag(String?.none)
+                    ForEach(engine.scripts) { Text($0.name).tag(Optional($0.id)) }
+                }
+                if engine.scripts.isEmpty { Text("请先在设置中导入音源脚本。").foregroundStyle(.secondary) }
             }
-            if let result { CatalogSearchResults(result: result, kind: kind == .artists ? .albums : .songs) }
+            if let script {
+                Section("搜索平台") {
+                    if loadingPlatforms { ProgressView("正在读取平台") }
+                    else if let platformError { Text(platformError).foregroundStyle(.secondary) }
+                    else if platforms.isEmpty { Text("此脚本未声明搜索能力，无法用于关键词搜索。").foregroundStyle(.secondary) }
+                    ForEach(platforms, id: \.self) { platform in
+                        Button {
+                            if selected.contains(platform) { selected.remove(platform) } else { selected.insert(platform) }
+                        } label: {
+                            HStack {
+                                Text(ScopedSearchPlatform.name(platform)).foregroundStyle(.primary)
+                                Spacer()
+                                Image(systemName: selected.contains(platform) ? "checkmark.circle.fill" : "circle")
+                            }.contentShape(Rectangle())
+                        }.accessibilityAddTraits(selected.contains(platform) ? .isSelected : [])
+                    }
+                }
+                if !platforms.isEmpty {
+                    Button { search() } label: { Label("搜索", systemImage: "magnifyingglass") }.disabled(!canSearch || busy)
+                }
+                if busy { ProgressView("正在搜索") }
+                if let error { Text(error).foregroundStyle(.secondary) }
+                if let result {
+                    Section(script.name) {
+                        ForEach(result.failures, id: \.self) { Text($0).foregroundStyle(.secondary) }
+                        if result.songs.isEmpty && result.failures.isEmpty { Text("没有找到歌曲").foregroundStyle(.secondary) }
+                        ForEach(result.songs.indices, id: \.self) { index in
+                            let song = result.songs[index]
+                            Button { playback.play(result.songs, index: index) } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(song.title).font(.headline)
+                                    Text([song.artist, song.album].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+                                        .font(.subheadline).foregroundStyle(.secondary)
+                                    Text(ScopedSearchPlatform.name(song.platform ?? "")).font(.caption).foregroundStyle(.secondary)
+                                }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                            }.buttonStyle(.plain)
+                            .swipeActions {
+                                Button("下载") { downloads.enqueue([song]) }.tint(.blue)
+                                Button("收藏") { library.favorite(song) }.tint(.orange)
+                            }
+                        }
+                    }
+                }
+            }
         }
-        .navigationTitle(entry.title)
-        .task(id: attempt) {
-            busy = true
-            error = nil
+        .navigationTitle("搜索")
+        .task(id: [script?.id, script?.text]) { await loadPlatforms() }
+        .onChange(of: input) { _ in resetSearch() }
+        .onChange(of: selected) { _ in resetSearch() }
+        .onDisappear { resetSearch() }
+    }
+
+    @MainActor private func loadPlatforms() async {
+        resetSearch()
+        selected.removeAll(); platforms = []; platformError = nil; loadingPlatforms = false
+        guard let script else { scriptID = nil; return }
+        loadingPlatforms = true
+        defer { if !Task.isCancelled { loadingPlatforms = false } }
+        do {
+            let values = try await engine.declaredSearchPlatforms(for: script)
+            try Task.checkCancellation()
+            platforms = values
+        } catch { if !Task.isCancelled { platformError = error.localizedDescription } }
+    }
+
+    private func resetSearch() {
+        task?.cancel(); busy = false; result = nil; error = nil
+    }
+
+    private func search() {
+        guard canSearch, let script else { return }
+        resetSearch(); editing = false; busy = true
+        let query = input, scope = selected
+        task = Task { @MainActor in
             defer { if !Task.isCancelled { busy = false } }
             do {
-                let response = try await (kind == .artists ? PoolCatalog.releases(entry) : PoolCatalog.tracks(entry))
+                let response = try await engine.scopedSearch(query, script: script, platforms: scope)
                 try Task.checkCancellation()
                 result = response
             } catch { if !Task.isCancelled { self.error = error.localizedDescription } }

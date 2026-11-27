@@ -12,7 +12,58 @@ import Combine
     }
 }
 
+@MainActor private func verifyRoutes(_ dir: URL, _ base: String, _ preload: URL) async throws {
+    let engine = SourceEngine(store: dir.appendingPathComponent("routes"), preload: preload, matcher: { _ in fatalError("unscoped matcher called") })
+    func script(_ label: String) -> String {
+        """
+        lx.on(lx.EVENT_NAMES.request, async ({source,action,info}) => {
+          const path = '/routes/\(label)/'+source+'/'+action;
+          if(action==='search') {
+            await new Promise(r=>lx.request('\(base)'+path,{},r));
+            return [{id:'route-id',title:info.title,artist:info.artist}];
+          }
+          return '\(base)'+path+'/'+info.type;
+        });
+        const cap={type:'music',actions:['search','musicUrl'],qualitys:['flac','128k']};
+        lx.send(lx.EVENT_NAMES.inited,{sources:{kg:cap,kw:cap}});
+        """
+    }
+    try await engine.importScript(script("blocked"), name: "Blocked")
+    try await engine.importScript(script("selected"), name: "Selected")
+    let selected = engine.scripts[1], routes: [String: Set<String>] = [selected.id: ["kw"]]
+    var song = Song(id: UUID().uuidString, title: "Restricted", artist: "Singer", url: URL(string: base + "/routes/forbidden"), platform: "apple", lyrics: "[00:01.00]Line")
+    let folder = PlaybackFiles.folder(song)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let library = Library(), journal = dir.appendingPathComponent("routes-queue")
+    var initial: DownloadCenter? = DownloadCenter(engine: engine, library: library, journal: journal)
+    initial!.pause(); initial!.setAppleDownloadRoutes(routes); initial!.enqueueApple([song]); initial!.setAppleDownloadRoutes([:]); initial = nil
+    let queue = DownloadCenter(engine: engine, library: library, journal: journal)
+    precondition(queue.appleDownloadRoutes == [:] && queue.progress(for: song) == nil); queue.resume()
+    var observed = false
+    func wait() async throws {
+        let deadline = Date().addingTimeInterval(25)
+        while !queue.pending.isEmpty && Date() < deadline {
+            if let p = queue.progress(for: song), p > 0 && p < 1 { observed = true }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        precondition(queue.pending.isEmpty)
+    }
+    try await wait()
+    precondition(observed && queue.completed == 1 && queue.total == 1 && library.localSongs.first?.quality == "128k", "progress=\(observed), failures=\(queue.failures)")
+    var empty = song; empty.id += "-empty"; empty.title += " empty"
+    queue.enqueueApple([empty]); try await wait()
+    precondition(queue.completed == 0 && queue.failures[DownloadCenter.Key(empty)] != nil)
+    song.searchScriptID = selected.id; song.platform = "kw"; song.id = "route-id"
+    let result = try await engine.downloadMedia(song) { url in url }
+    precondition(result.source == selected.name && result.url.path == "/routes/selected/kw/musicUrl/128k")
+    try engine.remove(selected)
+    do { _ = try await engine.resolve(song); fatalError("removed pin accepted") }
+    catch { precondition(error.localizedDescription.contains("移除")) }
+    print("Verified persisted and empty routes, scoped matching, pinned resolution, partial-byte progress and truncated-file fallback")
+}
+
 @MainActor func verifyBulk(_ dir: URL, _ base: String, _ preload: URL) async throws {
+    try await verifyRoutes(dir, base, preload)
     let suffix = UUID().uuidString
     var song = Song(id: suffix, title: "Fixture", artist: "Singer", platform: "apple", lyrics: "[00:01.00]Fixture line", album: "Album", duration: 182, isrc: "USAAA9900001")
     var second = song; second.id += "-2"; second.title = "Second"; second.isrc = "USAAA9900002"

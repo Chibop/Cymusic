@@ -166,11 +166,23 @@ buf = io.BytesIO()
 with wave.open(buf, 'wb') as wav:
     wav.setparams((1, 2, 8000, 0, 'NONE', '')); wav.writeframes(bytes(16000))
 
+route_wav = io.BytesIO()
+with wave.open(route_wav, 'wb') as wav:
+    wav.setparams((1, 2, 44100, 0, 'NONE', '')); wav.writeframes(bytes(512 * 1024))
+
 class Endpoint(http.server.BaseHTTPRequestHandler):
     def log_message(self, *args): pass
     def do_GET(self):
         seen.append(self.path); times.append(time.monotonic())
         base = f"http://127.0.0.1:{self.server.server_port}"
+        if self.path.startswith('/routes/selected/kw/musicUrl/'):
+            body = route_wav.getvalue(); self.send_response(200); self.send_header('Content-Type','audio/wav')
+            self.send_header('Content-Length',str(len(body))); self.end_headers()
+            if self.path.endswith('/flac'):
+                self.wfile.write(body[:1024]); return
+            for i in range(0,len(body),16384):
+                self.wfile.write(body[i:i+16384]); self.wfile.flush(); time.sleep(.08)
+            return
         if self.path == '/drip':
             self.send_response(200); self.send_header('Content-Type','audio/mpeg'); self.end_headers()
             try:
@@ -206,6 +218,7 @@ with http.server.ThreadingHTTPServer(('127.0.0.1',0),Endpoint) as server:
         print('profile HTTP requests:', {p:seen.count(p) for p in sorted(set(seen))}); sys.exit(0)
     expected = ['/offline/flac','/offline/320k','/offline/128k','/media/mid/flac','/media/mid/320k','/media/mid/128k']
     assert seen[:9] == expected + expected[3:], seen
+    assert [p for p in seen if p.startswith('/routes/')] == ['/routes/selected/kw/search','/routes/selected/kw/musicUrl/flac','/routes/selected/kw/musicUrl/128k'], seen
     bulk = [(p, t) for p,t in zip(seen,times) if p.startswith('/bulk/')]
     assert [p for p,t in bulk] == ['/bulk/flac24bit','/bulk/flac24bit','/bulk/flac','/bulk/flac24bit','/bulk/flac','/bulk/metadata','/bulk/metadata'] + ['/bulk/noheader'] * 3, bulk
     assert bulk[-1][1] - bulk[-2][1] >= 4 and bulk[-2][1] - bulk[-3][1] >= 2, bulk
