@@ -10,9 +10,9 @@ import AVFoundation
     init() {
         let reset = Result { try DownloadedAudioCleanup.once(documents: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0], support: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]) }
         let engine = SourceEngine(), library = Library(), playback = Playback()
-        if case .failure(let error) = reset { library.message = "下载缓存未能完全清理：\(error.localizedDescription)" }
+        if case .failure(let error) = reset { library.message = "下载缓存未能完全清理：\(L10n.message(for: error))" }
         if let old = try? LegacyMigration.sourceSettings(documents: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]) {
-            do { try engine.restoreLegacy(old) } catch { library.message = "旧音源未迁移，原数据未改动：\(error.localizedDescription)" }
+            do { try engine.restoreLegacy(old) } catch { library.message = "旧音源未迁移，原数据未改动：\(L10n.message(for: error))" }
         }
         playback.resolveMedia = { try await engine.resolveMedia($0) }
         playback.downloadFromPool = { song in
@@ -35,17 +35,16 @@ struct RootScreen: View {
     @EnvironmentObject private var library: Library
     @EnvironmentObject private var engine: SourceEngine
     @AppStorage("appearance") private var appearance = 0
-    @AppStorage(AppLanguage.storageKey) private var language = AppLanguage.system
     private enum Page: Hashable { case discovery, library, search, settings }
     @State private var page = Page.discovery
     @State private var playerShown = false
     var body: some View {
         shell
             .sheet(isPresented: $playerShown) { PlayerScreen().presentationDragIndicator(.visible) }
-            .environment(\.locale, language.locale)
             .preferredColorScheme(appearance == 0 ? nil : appearance == 1 ? .light : .dark)
             .onChange(of: library.artworkRevision) { _ in playback.refreshArtwork { library.artworkOverride(for: $0) } }
             .receiveSharedSource { text, name in try await engine.importScript(text, name: name) }
+            .environment(\.locale, L10n.locale)
     }
     @ViewBuilder private var shell: some View {
         if #available(iOS 26.1, *) {
@@ -81,7 +80,6 @@ struct RootScreen: View {
         NavigationStack {
             Form {
                 Section("播放来源") { NavigationLink { SourcesScreen() } label: { Label("自定义音源", systemImage: "dot.radiowaves.left.and.right") } }
-                Section { LanguagePicker() }
                 Section("音乐资料库") { NavigationLink { AppleLibraryScreen() } label: { Label("同步 Apple Music 资料库", systemImage: "arrow.triangle.2.circlepath") } }
                 Section("专辑封面") { AlbumCoverSyncButton() }
                 Section("外观") { Picker("主题", selection: $appearance) { Text("跟随系统").tag(0); Text("浅色").tag(1); Text("深色").tag(2) } }

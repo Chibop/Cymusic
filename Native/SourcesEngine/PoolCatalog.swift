@@ -55,6 +55,33 @@ enum PoolCatalog {
         return data
     }
 
+    /// Metadata only: an Apple catalog ID is never an audio-provider ID.
+    static func searchSongs(_ term: String) async throws -> [Song] {
+        let term = term.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !term.isEmpty else { return [] }
+        #if canImport(MusicKit)
+        if musicKitAvailable {
+            do {
+                var request = MusicCatalogSearchRequest(term: term, types: [MusicKit.Song.self])
+                request.limit = 25
+                let songs = try await request.response().songs.map(song)
+                if !songs.isEmpty { return songs }
+            } catch { try Task.checkCancellation() }
+        }
+        #endif
+        var lastError: Error?, succeeded = false
+        for country in ["cn", "hk"] {
+            do {
+                let rows = try await iTunes(term, country: country)
+                try Task.checkCancellation()
+                if !rows.isEmpty { return rows }
+                succeeded = true
+            } catch { try Task.checkCancellation(); lastError = error }
+        }
+        if !succeeded, let lastError { throw lastError }
+        return []
+    }
+
     static func search(_ term: String) async throws -> Results {
         #if canImport(MusicKit)
         if musicKitAvailable {

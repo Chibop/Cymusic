@@ -6,7 +6,13 @@ import UniformTypeIdentifiers
 /// Each source has its own ID namespace; never use user-provided names as path components.
 enum PlaybackFiles {
   static func folder(_ song: Song) -> URL {
-    let identity = Data("\(song.platform ?? "")\u{0}\(song.id)".utf8)
+    let identity: Data
+    if let tier = song.requestedQuality {
+      let parts = [song.searchScriptID ?? "", song.platform ?? "", song.id, tier]
+      identity = Data(("exact:" + parts.map { "\($0.utf8.count):\($0)" }.joined()).utf8)
+    } else {
+      identity = Data("\(song.platform ?? "")\u{0}\(song.id)".utf8)
+    }
     let key = SHA256.hash(data: identity).map { String(format: "%02x", $0) }.joined()
     return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
       .appendingPathComponent("PlaybackCache", isDirectory: true).appendingPathComponent(
@@ -54,7 +60,7 @@ enum PlaybackFiles {
     try FileManager.default.moveItem(at: stage, to: final)
     return final
   }
-  enum CacheError: LocalizedError {
+  enum CacheError: ChineseUIError {
     case unsupported
     var errorDescription: String? { "此音频不支持离线缓存。" }
   }

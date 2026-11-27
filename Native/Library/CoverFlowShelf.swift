@@ -45,7 +45,9 @@ final class SleeveStage: UIView {
   private func refresh(animated: Bool) {
     guard let shelf, bounds.width > 0, bounds.height > 0 else { return }
     lastSize = bounds.size
-    let side = min(258, max(135, bounds.width * 0.28))
+    // Double the original jacket side, but keep the entire square visible on short stages.
+    let desiredSide = 2 * min(258, max(135, bounds.width * 0.28))
+    let side = min(desiredSide, bounds.height * 0.96)
     let depth = min(11, max(7, bounds.width * 0.011))
     let window = max(0, shelf.focus - 5)..<max(0, min(shelf.count, shelf.focus + 6))
     CATransaction.begin()
@@ -62,7 +64,7 @@ final class SleeveStage: UIView {
       card.size(side, depth)
       let n = index - shelf.focus, a = CGFloat(abs(n)), sign = CGFloat(n.signum())
       let x = bounds.midX + (n == 0 ? 0 : sign * side * (0.85 + (a - 1) * 0.46))
-      let point = CGPoint(x: x, y: bounds.height * 0.45)
+      let point = CGPoint(x: x, y: max(bounds.height * 0.45, side * 0.51))
       let z: CGFloat = n == 0 ? 0 : -70 - a * 12
       var pose = CATransform3DMakeTranslation(0, 0, z)
       pose = CATransform3DRotate(pose, -sign * 52 * .pi / 180, 0, 1, 0)

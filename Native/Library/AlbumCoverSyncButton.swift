@@ -26,7 +26,7 @@ private struct AlbumCoverSyncControls: View {
         Button(zh ? "取消" : "Cancel") { sync.cancel() }.disabled(p.phase == .cancelling)
       } else {
         Button { sync.start(library: library) } label: {
-          Label(zh ? "从 Apple Music 同步专辑封面" : "Sync album covers from Apple Music", systemImage: "arrow.triangle.2.circlepath")
+          Label(zh ? "从 Apple Music 补全缺失的专辑封面" : "Fill missing album covers from Apple Music", systemImage: "arrow.triangle.2.circlepath")
         }
       }
       if p.phase == .cancelled { Text(zh ? "已取消" : "Cancelled").font(.subheadline) }

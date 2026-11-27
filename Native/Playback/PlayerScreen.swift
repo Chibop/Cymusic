@@ -208,7 +208,7 @@ struct PlayerScreen: View {
         Button("关闭定时") { playback.sleep(minutes: nil) }
       } label: {
         Label(
-          playback.sleepUntil.map { "定时至 " + $0.formatted(date: .omitted, time: .shortened) }
+          playback.sleepUntil.map { "定时至 " + $0.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(L10n.locale)) }
             ?? (playback.sleepAfterTrack ? "播完当前歌曲后停止" : "定时关闭"), systemImage: "moon.zzz")
       }
     } label: {

@@ -1,50 +1,34 @@
-import SwiftUI
+import Foundation
 
-enum AppLanguage: String, CaseIterable {
-    case system, chinese = "zh-Hans", english = "en"
+/// Only app-authored localized errors may supply text directly to the UI.
+protocol ChineseUIError: LocalizedError {}
 
-    static let storageKey = "app.language"
-
-    var locale: Locale {
-        switch self {
-        case .system: return .autoupdatingCurrent
-        default: return Locale(identifier: rawValue)
-        }
-    }
-
-    static var selected: Self {
-        Self(rawValue: UserDefaults.standard.string(forKey: storageKey) ?? "") ?? .system
-    }
-}
-
-/// Place inside the existing settings Form; selection survives relaunches.
-struct LanguagePicker: View {
-    @AppStorage(AppLanguage.storageKey) private var language = AppLanguage.system
-
-    var body: some View {
-        Picker("语言", selection: $language) {
-            Text("跟随系统").tag(AppLanguage.system)
-            Text(verbatim: "简体中文").tag(AppLanguage.chinese)
-            Text(verbatim: "English").tag(AppLanguage.english)
-        }
-    }
-}
-
-/// For app-owned messages composed outside SwiftUI. Do not pass user metadata,
-/// OS errors, or provider responses as keys. SwiftUI literals localize directly.
 enum L10n {
-    static func text(_ key: String) -> String {
-        let language = AppLanguage.selected
-        let bundle: Bundle
-        if language != .system, let url = Bundle.main.url(forResource: language.rawValue, withExtension: "lproj") {
-            bundle = Bundle(url: url) ?? .main
-        } else {
-            bundle = .main
+    static let locale = Locale(identifier: "zh-Hans")
+
+    static func quality(_ value: String) -> String {
+        var parts = value.components(separatedBy: " · ")
+        switch parts[0] {
+        case "Hi-Res Lossless": parts[0] = "高解析度无损"
+        case "Lossless", "flac": parts[0] = value == "flac" ? "无损（FLAC）" : "无损"
+        case "128k": parts[0] = "标准（128 kbps）"
+        case "320k": parts[0] = "高品质（320 kbps）"
+        default: return value
         }
-        return bundle.localizedString(forKey: key, value: key, table: nil)
+        return parts.joined(separator: " · ")
     }
 
-    static func format(_ key: String, _ arguments: CVarArg...) -> String {
-        String(format: text(key), locale: AppLanguage.selected.locale, arguments: arguments)
+    static func message(for error: Error) -> String {
+        if let known = error as? ChineseUIError, let text = known.errorDescription { return text }
+        if let url = error as? URLError {
+            switch url.code {
+            case .notConnectedToInternet: return "未连接网络，请检查网络连接。"
+            case .timedOut: return "请求超时，请重试。"
+            case .badURL, .unsupportedURL: return "链接无效或不受支持。"
+            default: return "无法完成网络请求（错误码：\(url.errorCode)）。"
+            }
+        }
+        if error is DecodingError { return "数据格式有误，无法读取。" }
+        return "操作失败（错误码：\((error as NSError).code)）。"
     }
 }

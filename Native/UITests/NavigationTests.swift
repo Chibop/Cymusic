@@ -31,8 +31,48 @@ final class NavigationTests: XCTestCase {
         waitForExpectations(timeout: 5)
     }
 
+    // Seed an MP3 (128 kbps) and a PCM WAV (24-bit/96 kHz) in importedLocalMusic.
+    func testCollectionRowsShowFileQuality() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-AppleLanguages", "(zh-Hans)", "-app.language", "zh-Hans"]
+        app.launch()
+        app.tabBars.buttons["资料库"].tap()
+        app.buttons["library.menu"].tap()
+        app.buttons["全部歌曲"].tap()
+        func row(_ title: String) -> XCUIElement {
+            app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", title)).firstMatch
+        }
+        let mp3 = row("Shelf MP3"), pcm = row("Shelf PCM")
+        try XCTSkipUnless(mp3.waitForExistence(timeout: 4) && pcm.exists, "Requires shelf quality fixtures")
+        XCTAssertTrue(mp3.label.contains("MP3 · 128 kbps"), mp3.label)
+        XCTAssertTrue(pcm.label.contains("高解析度无损 · PCM · 24-bit · 96 kHz"), pcm.label)
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "MENU All Songs – indexed quality"; shot.lifetime = .keepAlways; add(shot)
+    }
+
+    // Seed importedLocalMusic with a track titled "Localization Fixture".
+    func testChineseLibraryActionsWithEnglishPreferences() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-AppleLanguages", "(en-US)", "-AppleLocale", "en_US", "-app.language", "en"]
+        app.launch()
+        app.tabBars.buttons["资料库"].tap()
+        XCTAssertEqual(app.buttons["library.menu"].label, "菜单")
+        app.buttons["library.menu"].tap()
+        app.buttons["全部歌曲"].tap()
+        let actions = app.buttons["Localization Fixture 的操作"]
+        try XCTSkipUnless(actions.waitForExistence(timeout: 4), "Requires Localization Fixture audio")
+        actions.tap()
+        XCTAssertTrue(app.buttons["添加到收藏"].exists)
+        app.buttons["删除缓存歌曲"].tap()
+        let alert = app.alerts["删除缓存歌曲？"]
+        XCTAssertTrue(alert.staticTexts["Localization Fixture"].exists)
+        XCTAssertTrue(alert.buttons["删除"].exists)
+        alert.buttons["取消"].tap()
+        XCTAssertTrue(actions.exists)
+    }
+
     func testNativeTabNavigation() throws {
-        let app = XCUIApplication(); app.launchArguments += ["-AppleLanguages", "(zh-Hans)", "-app.language", "zh-Hans"]; app.launch()
+        let app = XCUIApplication(); app.launchArguments += ["-AppleLanguages", "(en-US)", "-AppleLocale", "en_US", "-app.language", "en"]; app.launch()
         let settings = app.tabBars.buttons["设置"]
         XCTAssertEqual(app.tabBars.buttons.allElementsBoundByIndex.map(\.label), ["发现", "资料库", "搜索", "设置"])
         XCTAssertTrue(settings.waitForExistence(timeout: 10)); settings.tap()

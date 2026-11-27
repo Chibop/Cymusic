@@ -19,7 +19,7 @@ private struct ShelfAlbum: Identifiable {
       }
       let s = sorted[0]
       return Self(
-        id: key, title: s.album ?? "Unknown Album", artist: s.albumArtist ?? s.artist,
+        id: key, title: s.album ?? "未知专辑", artist: s.albumArtist ?? s.artist,
         tracks: sorted, art: sorted.lazy.compactMap { library.albumArtwork(for: $0) }.first)
     }.sorted {
       $0.title == $1.title
@@ -110,7 +110,7 @@ struct LibraryScreen: View {
           landscapeDisplay
         } else {
           let width = max(1, min(g.size.width - 12, 560))
-          let height = max(1, min(g.size.height * 0.60, width * 1.16))
+          let height = max(1, min(g.size.height * 0.65, width * 1.20))
           let dial = max(1, min(width * 0.61, g.size.height - height - 22, 270))
           VStack(spacing: 0) {
             display(width: width, height: height).padding(.top, 4)
@@ -181,7 +181,7 @@ struct LibraryScreen: View {
       case .success(let urls): Task { await library.importFiles(urls) }
       case .failure(let error):
         if (error as? CocoaError)?.code != .userCancelled {
-          library.message = error.localizedDescription
+          library.message = L10n.message(for: error)
         }
       }
     }
@@ -246,7 +246,7 @@ struct LibraryScreen: View {
           .subheadline
         ).foregroundStyle(Color(white: 0.76))
         if inQueue, let badge = playback.current?.quality {
-          Text(verbatim: badge).font(.caption2.monospaced()).foregroundStyle(Color(white: 0.76))
+          Text(verbatim: L10n.quality(badge)).font(.caption2.monospaced()).foregroundStyle(Color(white: 0.76))
         }
       }.lineLimit(1).padding(.horizontal, 8).padding(.bottom, 12).foregroundStyle(.white)
     }
@@ -517,7 +517,7 @@ private struct ClickWheel: View {
     } label: {
       Group {
         if symbol == "MENU" {
-          Text(verbatim: symbol).font(.system(size: 13, weight: .bold)).tracking(0.6)
+          Text(label).font(.system(size: 13, weight: .bold)).tracking(0.6)
         } else {
           Image(systemName: symbol).font(.system(size: 16, weight: .semibold))
         }
@@ -593,7 +593,7 @@ private struct AlbumDetail: View {
                 VStack(alignment: .leading, spacing: 3) {
                   Text(verbatim: song.title).font(.body)
                   if let q = song.quality {
-                    Label(q, systemImage: "waveform").font(.caption2).foregroundStyle(.secondary)
+                    Label(L10n.quality(q), systemImage: "waveform").font(.caption2).foregroundStyle(.secondary)
                   }
                 }
                 Spacer()
@@ -604,7 +604,7 @@ private struct AlbumDetail: View {
                 }
               }.padding(.vertical, 5).frame(minHeight: 42).contentShape(Rectangle())
             }.buttonStyle(.plain).contextMenu {
-              Button(library.isFavorite(song) ? "Remove from favorites" : "Add to favorites") {
+              Button(library.isFavorite(song) ? "取消收藏" : "添加到收藏") {
                 library.favorite(song)
               }
               Button("Delete cached track", role: .destructive) { removing = song }
@@ -781,10 +781,13 @@ private struct LibraryTracks: View {
           VStack(alignment: .leading) {
             Text(song.title).lineLimit(1)
             Text(song.artist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            if let quality = song.quality {
+              Label(L10n.quality(quality), systemImage: "waveform").font(.caption2).foregroundStyle(.secondary)
+            }
           }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
         }.buttonStyle(.plain)
         Menu {
-          Button(library.isFavorite(song) ? "Remove from favorites" : "Add to favorites") {
+          Button(library.isFavorite(song) ? "取消收藏" : "添加到收藏") {
             library.favorite(song)
           }
           if !library.playlists.isEmpty {

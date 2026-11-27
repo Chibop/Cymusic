@@ -15,4 +15,5 @@ struct Song: Codable, Identifiable, Hashable {
     var quality: String? = nil
     var audioSource: String? = nil
     var searchScriptID: String? = nil
+    var requestedQuality: String? = nil
 }

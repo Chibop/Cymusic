@@ -12,7 +12,7 @@ with tempfile.TemporaryDirectory() as tmp:
     root = Path(tmp)
     src = root / 'Sources'
     src.mkdir()
-    for path in ['App/Song.swift', 'Discovery/DownloadCenter.swift', 'Discovery/DiscoveryCache.swift',
+    for path in ['App/LanguageSettings.swift', 'App/Song.swift', 'Discovery/DownloadCenter.swift', 'Discovery/DiscoveryCache.swift',
                  'Playback/PlaybackMedia.swift', 'Library/Library.swift', 'Library/LegacyMigration.swift',
                  *['SourcesEngine/' + f + '.swift' for f in ['Catalog', 'PoolCatalog', 'PoolMatcher', 'ProviderSession', 'SourceEngine']]]:
         shutil.copy(native / path, src)

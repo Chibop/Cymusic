@@ -27,12 +27,12 @@ import MediaPlayer
                     }.disabled(sync.busy)
                 }
                 if let date = sync.snapshot?.syncedAt {
-                    LabeledContent(zh ? "上次同步" : "Last synced", value: date.formatted(date: .abbreviated, time: .shortened))
+                    LabeledContent(zh ? "上次同步" : "Last synced", value: date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened).locale(L10n.locale)))
                 }
             } footer: { Text(zh ? "同步只在此设备保存资料库信息。下载时会向音源搜索所选曲目，以可用的最高音质保存，并尝试获取歌词。" : "Sync keeps library metadata on this device. Downloads search providers for the selected tracks, request their best available quality, and look for lyrics.") }
             if !downloads.pending.isEmpty {
                 Section("下载队列") {
-                    if let until = downloads.retryAfter { Text("限流等待至 \(until.formatted(date: .omitted, time: .standard))") }
+                    if let until = downloads.retryAfter { Text("限流等待至 \(until.formatted(Date.FormatStyle(date: .omitted, time: .standard).locale(L10n.locale)))") }
                     Button(downloads.isPaused ? "继续下载" : "暂停下载") { if downloads.isPaused { downloads.resume() } else { downloads.pause() } }
                     Button("停止剩余下载", role: .destructive) { downloads.stop() }
                 }
@@ -238,7 +238,7 @@ private struct AppleLocalFileDetails: View {
                     var found = [String: [String]](), failed = [String: String]()
                     for script in engine.scripts {
                         do { found[script.id] = try await engine.declaredDownloadPlatforms(for: script) }
-                        catch { failed[script.id] = error.localizedDescription }
+                        catch { failed[script.id] = L10n.message(for: error) }
                         if Task.isCancelled { return }
                     }
                     platforms = found; errors = failed; loading = false

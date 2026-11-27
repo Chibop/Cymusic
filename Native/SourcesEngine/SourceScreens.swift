@@ -12,9 +12,9 @@ struct SourcesScreen: View {
         List {
             Section {
                 Picker("播放音质", selection: Binding(get: { engine.quality }, set: { value in
-                    do { try engine.setQuality(value) } catch { self.error = error.localizedDescription }
+                    do { try engine.setQuality(value) } catch { self.error = L10n.message(for: error) }
                 })) {
-                    ForEach(SourceEngine.Quality.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    ForEach(SourceEngine.Quality.allCases, id: \.self) { Text(L10n.quality($0.rawValue)).tag($0) }
                 }
             }
             Section("已安装") {
@@ -59,7 +59,7 @@ struct SourcesScreen: View {
     private func run(_ operation: @escaping @MainActor () async throws -> Void) {
         error = nil
         Task { @MainActor in
-            do { try await operation() } catch { self.error = error.localizedDescription }
+            do { try await operation() } catch { self.error = L10n.message(for: error) }
         }
     }
 }

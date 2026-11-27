@@ -1,7 +1,7 @@
 import Foundation
 
 typealias SourceJSON = [String: Any]
-struct SourceFailure: LocalizedError {
+struct SourceFailure: ChineseUIError {
     let errorDescription: String?
     init(_ message: String) { errorDescription = message }
 }
@@ -9,7 +9,7 @@ struct SourceFailure: LocalizedError {
 /// A bulk job owns one of these scopes. A script or matcher may catch a network
 /// error; latch the first 429 so it cannot silently advance to another provider.
 final class BulkHTTP: @unchecked Sendable {
-    struct Throttled: LocalizedError {
+    struct Throttled: ChineseUIError {
         let retryAfter: TimeInterval?
         var errorDescription: String? { "服务请求过于频繁 (HTTP 429)" }
     }
@@ -209,7 +209,7 @@ actor ProviderSession {
         case "init", "response":
             guard let continuation = pending.removeValue(forKey: key) else { return }
             if data["status"] as? Bool == true { continuation.resume(returning: data) }
-            else { continuation.resume(throwing: SourceFailure(data["errorMessage"] as? String ?? "音源请求失败")) }
+            else { continuation.resume(throwing: SourceFailure("音源请求失败")) }
         case "request":
             guard !pending.isEmpty, http[key] == nil else { return }
             http[key] = Task {

@@ -25,6 +25,6 @@ with TemporaryDirectory() as tmp, ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     Thread(target=srv.serve_forever, daemon=True).start()
     obj = tmp + '/runtime.o'; exe = tmp + '/probe'
     run(['xcrun','clang','-fobjc-arc','-c','Runtime/CyMusicUserApiRuntime.m','-o',obj], cwd=root, check=True)
-    run(['xcrun','swiftc','-D','SCOPED_SEARCH_PROBE','-import-objc-header','Runtime/CyMusicUserApiRuntime.h','-framework','JavaScriptCore','-framework','Security',obj,'../App/Song.swift','Catalog.swift','PoolCatalog.swift','PoolMatcher.swift','ProviderSession.swift','SourceEngine.swift','ScopedSearch.swift','ScopedSearchProbe.swift','-o',exe], cwd=root, check=True)
+    run(['xcrun','swiftc','-D','SCOPED_SEARCH_PROBE','-import-objc-header','Runtime/CyMusicUserApiRuntime.h','-framework','JavaScriptCore','-framework','Security',obj,'../App/LanguageSettings.swift','../App/Song.swift','Catalog.swift','PoolCatalog.swift','PoolMatcher.swift','ProviderSession.swift','SourceEngine.swift','ScopedSearch.swift','ScopedSearchProbe.swift','-o',exe], cwd=root, check=True)
     run([exe,tmp+'/store.json',str(root/'Runtime/user-api-preload.js'),f'http://127.0.0.1:{srv.server_port}'],check=True,timeout=45)
     srv.shutdown()

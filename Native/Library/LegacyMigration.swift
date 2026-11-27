@@ -86,7 +86,7 @@ enum LegacyMigration {
             guard let id = rawID, !id.isEmpty else { throw invalid }
             let platform = row["platform"] as? String
             let song = Song(id: id, title: row["title"] as? String ?? row["name"] as? String ?? id,
-                            artist: row["artist"] as? String ?? row["singer"] as? String ?? "Unknown Artist",
+                            artist: row["artist"] as? String ?? row["singer"] as? String ?? "未知艺人",
                             url: remote(row["url"]), artwork: remote(row["artwork"]), platform: platform, lyrics: row["rawLrc"] as? String)
             if let i = byID[id] {
                 // Native Song.id is also the provider lookup ID. Do not prefix

@@ -47,7 +47,9 @@ private final class TransferObserver: NSObject, URLSessionDownloadDelegate, @unc
     struct Key: Hashable {
         let platform: String?
         let id: String
-        init(_ song: Song) { platform = song.platform; id = song.id }
+        let quality: String?
+        let script: String?
+        init(_ song: Song) { platform = song.platform; id = song.id; quality = song.requestedQuality; script = quality == nil ? nil : song.searchScriptID }
     }
     private struct Job: Codable {
         let song: Song
@@ -104,7 +106,7 @@ private final class TransferObserver: NSObject, URLSessionDownloadDelegate, @unc
         self.journal = journal ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Cymusic/download-queue.json")
         do { state = try JSONDecoder().decode(State.self, from: Data(contentsOf: self.journal)) }
         catch let e as CocoaError where e.code == .fileReadNoSuchFile { }
-        catch { library.message = error.localizedDescription }
+        catch { library.message = L10n.message(for: error) }
         pending = Set(state.jobs.map { Key($0.song) }); total = state.batchTotal ?? state.jobs.count
         completed = state.completed ?? 0
         appleDownloadRoutes = state.appleDownloadRoutes
@@ -120,7 +122,7 @@ private final class TransferObserver: NSObject, URLSessionDownloadDelegate, @unc
         do {
             try FileManager.default.createDirectory(at: journal.deletingLastPathComponent(), withIntermediateDirectories: true)
             try JSONEncoder().encode(state).write(to: journal, options: .atomic)
-        } catch { library.message = error.localizedDescription }
+        } catch { library.message = L10n.message(for: error) }
     }
     private func valid(_ file: URL?) -> URL? {
         guard let file, file.isFileURL,
@@ -128,11 +130,16 @@ private final class TransferObserver: NSObject, URLSessionDownloadDelegate, @unc
         return file
     }
     private func indexed(_ song: Song) -> URL? {
-        valid(byID[Key(song)]?.url)
+        if song.requestedQuality != nil {
+            let key = "exact:" + PlaybackFiles.folder(song).lastPathComponent
+            return valid(library.localSongs.first { $0.id == key }?.url)
+        }
+        return valid(byID[Key(song)]?.url)
     }
     func localFile(_ song: Song) -> URL? {
-        if let exact = indexed(song) ?? valid(song.url) ?? valid(PlaybackFiles.existing(song)) { return exact }
+        if let exact = indexed(song) ?? (song.requestedQuality == nil ? (valid(song.url) ?? valid(PlaybackFiles.existing(song))) : nil) { return exact }
         // Fast prefilter before the version/ISRC/duration/ambiguity checks.
+        guard song.requestedQuality == nil else { return nil }
         let candidates = byRecording[Recording(song)] ?? []
         return valid(PoolMatcher.match(song, in: candidates)?.url)
     }
@@ -202,13 +209,13 @@ private final class TransferObserver: NSObject, URLSessionDownloadDelegate, @unc
                 if !Task.isCancelled, !state.jobs.isEmpty {
                     state.jobs[0].retries += 1
                     if state.jobs[0].retries > 2 || delay > 120 {
-                        failures[key] = error.localizedDescription; state.paused = true; isPaused = true
+                        failures[key] = L10n.message(for: error); state.paused = true; isPaused = true
                     }
                 }
                 persist(); continue
             } catch {
                 guard !Task.isCancelled else { return }
-                failures[key] = error.localizedDescription
+                failures[key] = L10n.message(for: error)
             }
             pending.remove(key); state.jobs.removeFirst(); persist()
         }
@@ -269,6 +276,11 @@ private final class TransferObserver: NSObject, URLSessionDownloadDelegate, @unc
         }
         let media = job.best ? try await engine.downloadBestMedia(song, routes: job.routes, save: save) : try await engine.downloadMedia(song, save: save)
         var saved = song
+        if song.requestedQuality != nil {
+            saved.id = "exact:" + PlaybackFiles.folder(song).lastPathComponent
+            saved.requestedQuality = nil
+            saved.url = nil
+        }
         saved.audioSource = media.source; saved.quality = media.quality
         // Lyrics are optional. A lyric 429 still governs the next queued item.
         if !PlaybackLyric.parse(saved.lyrics).contains(where: { $0.time != nil }) {
@@ -279,6 +291,6 @@ private final class TransferObserver: NSObject, URLSessionDownloadDelegate, @unc
         }
         library.registerCache(saved, media.url)
         try scope.check()
-        guard indexed(song) != nil else { throw CocoaError(.fileWriteUnknown) }
+        guard library.localSongs.contains(where: { $0.id == saved.id && $0.url == media.url }) else { throw CocoaError(.fileWriteUnknown) }
     }
 }

@@ -88,7 +88,7 @@ struct SourceScript: Codable, Identifiable {
                 scripts = state.scripts
                 quality = state.quality ?? .low
             }
-        } catch { notice = error.localizedDescription }
+        } catch { notice = L10n.message(for: error) }
     }
 
     // Restore only a fresh native store. Copy script text; do not evaluate it on launch.
@@ -138,7 +138,7 @@ struct SourceScript: Codable, Identifiable {
             tests[item.id] = Task {
                 let status: String
                 do { try await check(item); status = "正常" }
-                catch { status = error.localizedDescription }
+                catch { status = L10n.message(for: error) }
                 guard !Task.isCancelled else { return }
                 statuses[item.id] = status
                 tests[item.id] = nil
@@ -229,7 +229,9 @@ struct SourceScript: Codable, Identifiable {
                         accept: @escaping (URL) async throws -> URL) async throws -> Media {
         try Task.checkCancellation()
         let pin = song.searchScriptID
+        let requestedQuality = song.requestedQuality
         let native = ProviderSession.platform(song)
+        if requestedQuality != nil && (pin?.isEmpty != false || native.isEmpty) { throw SourceFailure("指定音质需要选择音源和平台") }
         func permits(_ id: String, _ platform: String) -> Bool {
             (pin == nil || (pin == id && native == platform)) && (routes == nil || routes?[id]?.contains(platform) == true)
         }
@@ -268,7 +270,7 @@ struct SourceScript: Codable, Identifiable {
             for item in compatible.filter({ $0.id == winner }) + compatible.filter({ $0.id != winner }) {
                 try Task.checkCancellation()
                 guard let session = try await load(item) else { continue }
-                for level in await session.qualities(for: candidate, preferred: quality, best: best) where exact == nil || level == exact {
+                for level in await session.qualities(for: candidate, preferred: quality, best: best || requestedQuality != nil) where (exact == nil || level == exact) && (requestedQuality == nil || level == requestedQuality) {
                     do {
                         try await BulkHTTP.current?.pace()
                         let url = try await session.requestURL(candidate, quality: level)

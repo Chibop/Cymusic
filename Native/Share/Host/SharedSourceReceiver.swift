@@ -67,7 +67,7 @@ private final class WebRedirects: NSObject, URLSessionTaskDelegate {
     }
 }
 
-private struct ImportError: LocalizedError {
+private struct ImportError: ChineseUIError {
     let errorDescription: String?
     init(_ message: String) { errorDescription = message }
 }
@@ -129,7 +129,7 @@ private struct SharedSourceReceiver: ViewModifier {
                     return try JSONDecoder().decode(SharedSource.self, from: data)
                 })
             }
-        } catch { inboxError = error.localizedDescription }
+        } catch { inboxError = L10n.message(for: error) }
     }
 }
 
@@ -163,18 +163,18 @@ private struct SharedSourceConfirmation: View {
                                     imported = true
                                 }
                                 try removeItem()
-                            } catch { errorMessage = error.localizedDescription }
+                            } catch { errorMessage = L10n.message(for: error) }
                         }
                     } label: {
                         if busy { ProgressView() }
                         else { Text(imported ? "完成" : "下载并导入") }
                     }.disabled(busy)
                 case .failure(let error):
-                    Section("无法读取分享内容") { Text(errorMessage ?? error.localizedDescription) }
+                    Section("无法读取分享内容") { Text(errorMessage ?? L10n.message(for: error)) }
                 }
                 if !imported {
                     Button("丢弃", role: .destructive) {
-                        do { try removeItem() } catch { errorMessage = error.localizedDescription }
+                        do { try removeItem() } catch { errorMessage = L10n.message(for: error) }
                     }.disabled(busy)
                 }
             }

@@ -12,6 +12,8 @@ import Foundation
         let base = ProcessInfo.processInfo.environment["MEDIA_BASE"]!
         let song = Song(id: "mid", title: "Test", artist: "Artist", platform: "tx")
         let engine = SourceEngine(store: store, preload: preload, matcher: { _ in [song] })
+        try await verifyExact(store.deletingLastPathComponent(), base, preload)
+        if CommandLine.arguments.contains("--exact") { return }
         if CommandLine.arguments.contains("--profile") {
             // Store/import is setup, not part of tap-to-validated-URL latency.
             let incompatible = "const end=Date.now()+150; while(Date.now()<end){}; lx.send(lx.EVENT_NAMES.inited,{sources:{kg:{actions:['musicUrl'],qualitys:['128k']}}});"
@@ -153,7 +155,7 @@ import Foundation
 SWIFT
 xcrun clang -fobjc-arc -c Runtime/CyMusicUserApiRuntime.m -o "$work/runtime.o"
 cp BulkQueueProbe.swiftfixture "$work/BulkQueueProbe.swift"
-xcrun swiftc -import-objc-header Runtime/CyMusicUserApiRuntime.h -framework JavaScriptCore -framework Security "$work/runtime.o" ../App/Song.swift Catalog.swift PoolCatalog.swift PoolMatcher.swift ProviderSession.swift SourceEngine.swift ../Discovery/DownloadCenter.swift ../Playback/PlaybackMedia.swift "$work/BulkQueueProbe.swift" "$work/Probe.swift" -o "$work/probe"
+xcrun swiftc -import-objc-header Runtime/CyMusicUserApiRuntime.h -framework JavaScriptCore -framework Security "$work/runtime.o" ../App/LanguageSettings.swift ../App/Song.swift Catalog.swift PoolCatalog.swift PoolMatcher.swift ProviderSession.swift SourceEngine.swift ../Discovery/DownloadCenter.swift ../Playback/PlaybackMedia.swift "$work/BulkQueueProbe.swift" "$work/Probe.swift" -o "$work/probe"
 if [[ $# -gt 0 && " ${*} " == *" --example "* ]]; then
     curl --fail --silent --show-error --max-time 20 'https://raw.githubusercontent.com/gyc-12/CyMusic-ImportMusicApi-Example/643dc33cb38a2eb3f72ac11b171100dd10834603/example1.js' -o "$work/example1.js"
 fi
@@ -175,6 +177,12 @@ class Endpoint(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         seen.append(self.path); times.append(time.monotonic())
         base = f"http://127.0.0.1:{self.server.server_port}"
+        if self.path.startswith('/exact/'):
+            _, _, label, site, track, tier = self.path.split('/')
+            if tier == '320k': self.send_error(503); return
+            marker = {('A','128k'):1, ('A','flac24bit'):2, ('B','128k'):3}[(label,tier)]
+            body = buf.getvalue()[:-1] + bytes([marker])
+            self.send_response(200); self.send_header('Content-Type','audio/wav'); self.send_header('Content-Length', str(len(body))); self.end_headers(); self.wfile.write(body); return
         if self.path.startswith('/routes/selected/kw/musicUrl/'):
             body = route_wav.getvalue(); self.send_response(200); self.send_header('Content-Type','audio/wav')
             self.send_header('Content-Length',str(len(body))); self.end_headers()
@@ -214,10 +222,15 @@ with http.server.ThreadingHTTPServer(('127.0.0.1',0),Endpoint) as server:
     env = dict(os.environ, MEDIA_BASE=f'http://127.0.0.1:{server.server_port}')
     if '--example' in sys.argv: env.update(PROVIDER_EXAMPLE=str(work/'example1.js'), PROVIDER_BASE=env['MEDIA_BASE'])
     subprocess.run([work/'probe', work, *sys.argv[2:]], env=env, check=True, timeout=180)
+    exact = [p for p in seen if p.startswith('/exact/')]
+    track = exact[0].split('/')[4]
+    assert exact == [f'/exact/{script}/kg/{track}/{tier}' for script,tier in [('A','128k'),('A','flac24bit'),('A','128k'),('A','flac24bit'),('B','128k'),('A','320k'),('A','320k')]], exact
+    print('Verified exact requests:', exact)
+    if '--exact' in sys.argv: sys.exit(0)
     if '--profile' in sys.argv:
         print('profile HTTP requests:', {p:seen.count(p) for p in sorted(set(seen))}); sys.exit(0)
     expected = ['/offline/flac','/offline/320k','/offline/128k','/media/mid/flac','/media/mid/320k','/media/mid/128k']
-    assert seen[:9] == expected + expected[3:], seen
+    assert [p for p in seen if not p.startswith('/exact/')][:9] == expected + expected[3:], seen
     assert [p for p in seen if p.startswith('/routes/')] == ['/routes/selected/kw/search','/routes/selected/kw/musicUrl/flac','/routes/selected/kw/musicUrl/128k'], seen
     bulk = [(p, t) for p,t in zip(seen,times) if p.startswith('/bulk/')]
     assert [p for p,t in bulk] == ['/bulk/flac24bit','/bulk/flac24bit','/bulk/flac','/bulk/flac24bit','/bulk/flac','/bulk/metadata','/bulk/metadata'] + ['/bulk/noheader'] * 3, bulk

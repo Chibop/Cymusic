@@ -61,7 +61,7 @@ struct ArtworkPickerSheet: View {
         page = nil; error = nil
         guard !term.isEmpty else { searching = false; return }; searching = true
         do { let result = try await ArtworkCatalog.search(term, albumMode: albumMode); try Task.checkCancellation(); page = result }
-        catch { guard !Task.isCancelled else { return }; self.error = error.localizedDescription }
+        catch { guard !Task.isCancelled else { return }; self.error = L10n.message(for: error) }
         searching = false
       }
       .onDisappear { applyTask?.cancel() }
@@ -75,7 +75,7 @@ struct ArtworkPickerSheet: View {
         let data = try await ArtworkCatalog.download(item); try Task.checkCancellation()
         try await library.replaceArtwork(for: seed, albumMode: albumMode, data: data)
         dismiss()
-      } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
+      } catch { if !Task.isCancelled { self.error = L10n.message(for: error) } }
       applying = nil
     }
   }

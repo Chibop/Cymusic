@@ -38,7 +38,7 @@ import Foundation
                 let data = try JSONEncoder().encode(result)
                 try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try data.write(to: file, options: .atomic)
-            } catch { problem = error.localizedDescription }
+            } catch { problem = L10n.message(for: error) }
         }
         request = task
         await task.value

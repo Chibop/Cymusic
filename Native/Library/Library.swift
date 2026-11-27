@@ -38,6 +38,9 @@ final class Library: ObservableObject {
   #if os(iOS) || ALBUM_COVER_SYNC_TESTS
     let albumCoverSync = AlbumCoverSync()
   #endif
+  // Unprojected records retain remote art that the offline shelf deliberately hides.
+  private var localAlbums: [String: [Song]] = [:]
+  private var indexWaiters: [CheckedContinuation<Void, Never>] = []
   private var indexing = false
   private var needsIndex = false
   @Published var message: String?
@@ -61,7 +64,7 @@ final class Library: ObservableObject {
       // No saved index yet.
     } catch {
       loadFailure =
-        "Could not load the library. The saved file has been preserved. \(error.localizedDescription)"
+        "无法载入资料库。原文件已保留。\(L10n.message(for: error))"
       message = loadFailure
     }
     if loadFailure == nil { recoverLegacyFiles() }
@@ -113,7 +116,7 @@ final class Library: ObservableObject {
       save(next)
     } catch {
       message =
-        "Legacy library import could not finish. It will retry on next launch. \(error.localizedDescription)"
+        "旧资料库导入未完成，下次启动时将重试。\(L10n.message(for: error))"
     }
   }
 
@@ -151,7 +154,31 @@ final class Library: ObservableObject {
     coverFile(store.songArtwork?[song.id]) ?? coverFile(store.albumArtwork?[albumArtworkKey(for: song)])
   }
 
-  func replaceArtwork(for song: Song, albumMode: Bool, data: Data) async throws {
+  private func usableArtwork(_ url: URL?) -> Bool {
+    guard let url, url.lastPathComponent.lowercased() != "unknown_track.png" else { return false }
+    if url.isFileURL {
+      guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
+        let src = CGImageSourceCreateWithURL(url as CFURL, nil), CGImageSourceGetCount(src) > 0
+      else { return false }
+      return CGImageSourceCreateThumbnailAtIndex(src, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceThumbnailMaxPixelSize: 1] as CFDictionary) != nil
+    }
+    guard let host = url.host?.lowercased(), !host.isEmpty,
+      ["http", "https"].contains(url.scheme?.lowercased()) else { return false }
+    return !(host == "example.com" && url.path.lowercased() == "/default.jpg")
+  }
+
+  func needsAlbumArtwork(_ key: String) -> Bool {
+    guard let members = localAlbums[key], !usableArtwork(coverFile(store.albumArtwork?[key])) else { return false }
+    return !members.contains { song in
+      usableArtwork(coverFile(store.songArtwork?[song.id])) || usableArtwork(coverFile(store.media?[song.id]?.cover))
+        || usableArtwork(coverFile(store.cachedArt?[song.id])) || usableArtwork(song.artwork)
+    }
+  }
+
+  @discardableResult
+  func replaceArtwork(for song: Song, albumMode: Bool, data: Data, ifMissingAlbum key: String? = nil) async throws -> Bool {
+    if let key, !needsAlbumArtwork(key) { return false }
     guard loadFailure == nil else { throw CocoaError(.fileReadCorruptFile) }
     let base = index.deletingLastPathComponent()
     let path = try await Task.detached(priority: .userInitiated) {
@@ -165,16 +192,19 @@ final class Library: ObservableObject {
       return path
     }.value
     try Task.checkCancellation()
+    // No suspension between checking live membership/artwork and saving the override.
+    if let key, !needsAlbumArtwork(key) { return false }
     var next = store
     if albumMode {
       if next.albumArtwork == nil { next.albumArtwork = [:] }
-      next.albumArtwork?[albumArtworkKey(for: song)] = path
+      next.albumArtwork?[key ?? albumArtworkKey(for: song)] = path
     } else {
       if next.songArtwork == nil { next.songArtwork = [:] }
       next.songArtwork?[song.id] = path
     }
     guard save(next) else { throw CocoaError(.fileWriteUnknown) }
     artworkRevision &+= 1
+    return true
   }
 
   private func resolved(_ original: Song) -> Song {
@@ -232,8 +262,10 @@ final class Library: ObservableObject {
   }
   private func rebuildLocalProjection() {
     shelfRevision &+= 1
+    localAlbums.removeAll(keepingCapacity: true)
     localSongs = store.songs.compactMap { original in
       guard let file = localFile(original) else { return nil }
+      localAlbums[albumArtworkKey(for: original), default: []].append(original)
       var song = original
       song.url = file
       song.quality = nil
@@ -263,10 +295,15 @@ final class Library: ObservableObject {
     guard loadFailure == nil else { return }
     if indexing {
       needsIndex = true
+      await withCheckedContinuation { indexWaiters.append($0) }
       return
     }
     indexing = true
-    defer { indexing = false }
+    defer {
+      indexing = false
+      for waiter in indexWaiters { waiter.resume() }
+      indexWaiters.removeAll()
+    }
     repeat {
       needsIndex = false
       rebuildLocalProjection()
@@ -319,7 +356,7 @@ final class Library: ObservableObject {
     guard file.isFileURL,
       (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
     else {
-      message = "Cached audio is unavailable: \(file.lastPathComponent)"
+      message = "缓存音频不可用：\(file.lastPathComponent)"
       return
     }
     var next = store
@@ -359,7 +396,7 @@ final class Library: ObservableObject {
       scheduleIndex()
       // A cache registration already has network access; save the catalog cover
       // here, never when an offline shelf is opened.
-      if let remote = song.artwork, ["http", "https"].contains(remote.scheme?.lowercased()) {
+      if let remote = song.artwork, !remote.isFileURL, usableArtwork(remote) {
         let base = index.deletingLastPathComponent()
         Task {
           guard let path = await DiskMedia.cacheCover(remote, directory: base),
@@ -411,7 +448,7 @@ final class Library: ObservableObject {
         try fm.removeItem(at: file)
       }
     } catch {
-      message = "Could not remove cached audio: \(error.localizedDescription)"
+      message = "无法删除缓存音频：\(L10n.message(for: error))"
       return
     }
     var next = store
@@ -447,7 +484,7 @@ final class Library: ObservableObject {
     guard
       !playlists.contains(where: { $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame })
     else {
-      message = "A playlist with that name already exists."
+      message = "已有同名歌单。"
       return
     }
     var next = store
@@ -503,7 +540,7 @@ final class Library: ObservableObject {
       rebuildLocalProjection()
       return true
     } catch {
-      message = "Could not save library: \(error.localizedDescription)"
+      message = "无法保存资料库：\(L10n.message(for: error))"
       return false
     }
   }
@@ -531,7 +568,7 @@ final class Library: ObservableObject {
         guard known.insert(path).inserted else { continue }
         let song = Song(
           id: "legacy:" + path, title: url.deletingPathExtension().lastPathComponent,
-          artist: "Unknown Artist", platform: "local")
+          artist: "未知艺人", platform: "local")
         next.songs.append(song)
         next.documentsPaths[song.id] = path
       }
@@ -559,10 +596,10 @@ final class Library: ObservableObject {
         }.value
         let song = Song(
           id: "local:" + file.lastPathComponent,
-          title: source.deletingPathExtension().lastPathComponent, artist: "Unknown Artist",
+          title: source.deletingPathExtension().lastPathComponent, artist: "未知艺人",
           platform: "local", lyrics: lyrics)
         imported.append((song, file))
-      } catch { failures.append("\(source.lastPathComponent): \(error.localizedDescription)") }
+      } catch { failures.append("\(source.lastPathComponent): \(L10n.message(for: error))") }
     }
     var next = store
     for (song, file) in imported {

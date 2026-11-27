@@ -25,30 +25,40 @@ final class AlbumCoverSync: ObservableObject {
     pause: @escaping () async throws -> Void = { try await Task.sleep(for: .seconds(3)) }
   ) -> Task<Void, Never> {
     if let job { return job }
-    // Snapshot in library order. Updating artwork rebuilds the live local projection.
-    var seen = Set<String>()
-    let albums = library.localSongs.filter { seen.insert(library.albumArtworkKey(for: $0)).inserted }
-    progress = Progress(phase: .running, total: albums.count)
+    progress = Progress(phase: .running)
     let task = Task {
+      // Embedded covers and album identity may still be indexing on launch.
+      await library.indexLocalFiles()
+      var seen = Set<String>()
+      let albums = library.localSongs.compactMap { song -> (String, Song)? in
+        let key = library.albumArtworkKey(for: song)
+        return seen.insert(key).inserted ? (key, song) : nil
+      }
+      progress.total = albums.count
       var madeRequest = false
-      for song in albums {
+      for (key, song) in albums {
         guard !Task.isCancelled else { break }
         let title = (song.album ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty else { progress.skipped += 1; continue }
+        guard !title.isEmpty, library.needsAlbumArtwork(key) else { progress.skipped += 1; continue }
         progress.currentAlbum = title
         let artist = (song.albumArtist ?? song.artist).trimmingCharacters(in: .whitespacesAndNewlines)
         let query = [title, artist].filter { !$0.isEmpty }.joined(separator: " ")
         do {
-          if madeRequest { try await pause() }
+          if madeRequest {
+            try await pause()
+            try Task.checkCancellation()
+            guard library.needsAlbumArtwork(key) else { progress.skipped += 1; continue }
+          }
           try Task.checkCancellation()
           madeRequest = true
           let page = try await search(query)
           try Task.checkCancellation()
-          guard let first = page.candidates.first else { progress.skipped += 1; continue }
+          guard let first = page.candidates.first, library.needsAlbumArtwork(key) else { progress.skipped += 1; continue }
           let data = try await download(first)
           try Task.checkCancellation()
-          try await library.replaceArtwork(for: song, albumMode: true, data: data)
-          progress.updated += 1
+          if try await library.replaceArtwork(for: song, albumMode: true, data: data, ifMissingAlbum: key) {
+            progress.updated += 1
+          } else { progress.skipped += 1 }
         } catch {
           if Task.isCancelled { break }
           progress.failed += 1

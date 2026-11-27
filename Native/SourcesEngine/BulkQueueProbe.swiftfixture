@@ -62,6 +62,52 @@ import Combine
     print("Verified persisted and empty routes, scoped matching, pinned resolution, partial-byte progress and truncated-file fallback")
 }
 
+@MainActor func verifyExact(_ dir: URL, _ base: String, _ preload: URL) async throws {
+    let engine = SourceEngine(store: dir.appendingPathComponent("exact-providers"), preload: preload, matcher: { _ in fatalError("unpinned lookup") })
+    for label in ["A", "B"] {
+        try await engine.importScript("""
+            lx.on(lx.EVENT_NAMES.request, async ({source,info}) => '\(base)/exact/\(label)/'+source+'/'+info.musicInfo.hash+'/'+info.type);
+            lx.send(lx.EVENT_NAMES.inited,{sources:{kg:{type:'music',actions:['musicUrl'],qualitys:['128k','flac24bit','320k']}}});
+            """, name: label)
+    }
+    let plain = Song(id: "fixture-" + UUID().uuidString, title: "Probe", artist: "Probe", platform: "kg", lyrics: "[00:00.00]Probe")
+    let old = dir.appendingPathComponent("previous.wav")
+    let original = Data("existing file".utf8)
+    try original.write(to: old)
+    var low = plain; low.searchScriptID = engine.scripts[0].id; low.requestedQuality = "128k"; low.url = old
+    var high = low; high.requestedQuality = "flac24bit"
+    var other = low; other.searchScriptID = engine.scripts[1].id
+    var broken = low; broken.requestedQuality = "320k"
+    let variants = [low, high, other]
+    defer { for item in variants + [broken] { try? FileManager.default.removeItem(at: PlaybackFiles.folder(item)) } }
+    for audition in [low, high] {
+        let media = try await engine.resolveMedia(audition)
+        precondition(media.url.path == "/exact/A/kg/\(plain.id)/\(audition.requestedQuality!)" && media.quality == audition.requestedQuality)
+    }
+    let library = Library(); library.registerCache(plain, old)
+    let queue = DownloadCenter(engine: engine, library: library, journal: dir.appendingPathComponent("exact-queue"))
+    func drain() async throws {
+        let until = Date().addingTimeInterval(20)
+        while !queue.pending.isEmpty && Date() < until { try await Task.sleep(nanoseconds: 20_000_000) }
+        precondition(queue.pending.isEmpty)
+    }
+    queue.enqueue([low, low, high, other]); try await drain()
+    precondition(queue.completed == 3 && queue.failures.isEmpty, "queue collision or transfer failure: \(queue.failures)")
+    let urls = variants.compactMap(queue.localFile)
+    precondition(Set(urls).count == 3 && library.localSongs.count == 4)
+    for (index, url) in urls.enumerated() {
+        let bytes = try Data(contentsOf: url)
+        precondition(bytes.last == UInt8(index + 1))
+        precondition(library.localSongs.contains { $0.url == url && $0.requestedQuality == nil })
+    }
+    queue.enqueue(variants); precondition(queue.pending.isEmpty)
+    queue.enqueue([broken]); try await drain()
+    precondition(queue.failures[DownloadCenter.Key(broken)] != nil && queue.localFile(broken) == nil)
+    do { _ = try await engine.resolveMedia(broken); fatalError("failed tier silently resolved") } catch {}
+    let preserved = try Data(contentsOf: old)
+    precondition(original == preserved && library.localSongs.count == 4)
+}
+
 @MainActor func verifyBulk(_ dir: URL, _ base: String, _ preload: URL) async throws {
     try await verifyRoutes(dir, base, preload)
     let suffix = UUID().uuidString

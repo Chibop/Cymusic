@@ -189,8 +189,8 @@ enum PlaybackMode: String, CaseIterable {
     wantsAudio = true
     loading = true
     isPlaying = false
-    let local = PlaybackFiles.existing(song)
-    offline = local != nil || song.url?.isFileURL == true
+    let local = song.requestedQuality == nil ? PlaybackFiles.existing(song) : nil
+    offline = local != nil || (song.requestedQuality == nil && song.url?.isFileURL == true)
     caching = transfers[PlaybackFiles.folder(song)] != nil
     nowPlaying()
     fetchArt(song.artwork, token)
@@ -201,7 +201,7 @@ enum PlaybackMode: String, CaseIterable {
         var lyricSong = song
         if let local {
           url = local
-        } else if let supplied = song.url, supplied.isFileURL {
+        } else if song.requestedQuality == nil, let supplied = song.url, supplied.isFileURL {
           url = supplied
         } else if let resolveMedia = self.resolveMedia {
           let media = try await resolveMedia(song)
@@ -209,9 +209,12 @@ enum PlaybackMode: String, CaseIterable {
           url = media.url
           lyricSong = media.match
           self.current?.audioSource = media.source
+          if song.requestedQuality != nil { self.current?.quality = media.quality }
           if self.queue.indices.contains(self.index), self.queue[self.index].id == song.id {
             self.queue[self.index].audioSource = media.source
           }
+        } else if song.requestedQuality != nil {
+          throw URLError(.resourceUnavailable)
         } else if let resolve = self.resolve {
           url = try await resolve(song)
         } else if let supplied = song.url {
@@ -264,7 +267,7 @@ enum PlaybackMode: String, CaseIterable {
   }
   private func fail(_ error: Error?) {
     pause()
-    errorMessage = error?.localizedDescription ?? "音频无法播放，请检查音源后重试。"
+    errorMessage = error.map { L10n.message(for: $0) } ?? "音频无法播放，请检查音源后重试。"
   }
   private func refresh() {
     let playing = wantsAudio && player.timeControlStatus == .playing
@@ -272,7 +275,7 @@ enum PlaybackMode: String, CaseIterable {
       isPlaying = playing
       nowPlaying()
       // Do not start a second full-file transfer while AVPlayer is buffering its first audio.
-      if playing && autoCache && !offline && !caching { cacheCurrent() }
+      if playing && autoCache && !offline && !caching && current?.requestedQuality == nil { cacheCurrent() }
     }
     loading =
       wantsAudio && !playing && errorMessage == nil
@@ -387,7 +390,7 @@ enum PlaybackMode: String, CaseIterable {
     sleepAfterTrack = true
   }
   func cacheCurrent() {
-    guard let song = current, let source, !source.isFileURL else { return }
+    guard let song = current, song.requestedQuality == nil, let source, !source.isFileURL else { return }
     let key = PlaybackFiles.folder(song)
     if let url = PlaybackFiles.existing(song) {
       offline = true
@@ -421,7 +424,7 @@ enum PlaybackMode: String, CaseIterable {
         }
       } catch {
         if self?.current.map(PlaybackFiles.folder) == key {
-          self?.cacheMessage = error.localizedDescription
+          self?.cacheMessage = L10n.message(for: error)
         }
       }
       self?.transfers[key] = nil

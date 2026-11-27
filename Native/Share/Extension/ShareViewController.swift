@@ -6,7 +6,7 @@ private struct SharedSource: Encodable {
     let value: String
 }
 
-private struct ShareError: LocalizedError {
+private struct ShareError: ChineseUIError {
     let errorDescription: String?
     init(_ message: String) { errorDescription = message }
 }
@@ -55,7 +55,7 @@ final class ShareViewController: UIViewController {
                 try JSONEncoder().encode(source).write(to: target, options: .atomic)
                 message.text = "已保存。打开 CyMusic 确认导入音源。"
             } catch {
-                message.text = "无法保存分享内容：\(error.localizedDescription)"
+                message.text = "无法保存分享内容：\(L10n.message(for: error))"
             }
             done.isHidden = false
         }

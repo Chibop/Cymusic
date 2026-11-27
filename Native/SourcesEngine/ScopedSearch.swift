@@ -56,6 +56,43 @@ extension SourceEngine {
         try await declaredPlatforms(for: script, action: "search")
     }
 
+    func matchCatalogSong(_ seed: Song, script: SourceScript, platform: String) async throws -> Song {
+        let script = try installed(script)
+        guard seed.platform == "apple", !platform.isEmpty, platform.lowercased() != "apple" else {
+            throw SourceFailure("请选择 Apple Music 歌曲和下载平台")
+        }
+        let query = "\(seed.title) \(seed.artist)"
+        let candidates = try await withScopedSession(script) { session -> [Song] in
+            let actions = await session.routes[platform] ?? []
+            guard actions.contains("musicUrl") else { throw SourceFailure("音源未声明所选平台的下载能力") }
+            switch platform {
+            case "tx": return try await PoolCatalog.qq(query)
+            case "wy": return try await PoolCatalog.netEase(query)
+            default:
+                guard actions.contains("search") else { throw SourceFailure("所选平台不支持歌曲匹配") }
+                return try await session.search(seed, platform: platform)
+            }
+        }
+        try Task.checkCancellation()
+        _ = try installed(script)
+        let scoped = candidates.filter { $0.platform == platform && $0.id != seed.id }
+        guard var match = PoolMatcher.match(seed, in: scoped) else { throw SourceFailure("所选平台未找到同一录音版本") }
+        match.searchScriptID = script.id
+        return match
+    }
+
+    func availableLevels(for song: Song, script: SourceScript) async throws -> [String] {
+        let script = try installed(script)
+        guard song.searchScriptID == script.id, let platform = song.platform,
+              !platform.isEmpty, platform.lowercased() != "apple" else { throw SourceFailure("歌曲与所选音源不匹配") }
+        let levels = try await withScopedSession(script) { session in
+            await session.qualities(for: song, preferred: .lossless, best: true)
+        }
+        try Task.checkCancellation()
+        _ = try installed(script)
+        return levels
+    }
+
     func scopedSearch(_ input: String, script: SourceScript, platforms: Set<String>) async throws -> ScopedSearchResults {
         let keyword = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !keyword.isEmpty, !platforms.isEmpty else { throw SourceFailure("请输入关键词并选择平台") }
@@ -77,7 +114,7 @@ extension SourceEngine {
                     }
                 } catch {
                     try Task.checkCancellation()
-                    result.failures.append("\(ScopedSearchPlatform.name(platform))：\(error.localizedDescription)")
+                    result.failures.append("\(ScopedSearchPlatform.name(platform))：\(L10n.message(for: error))")
                 }
             }
             try Task.checkCancellation()

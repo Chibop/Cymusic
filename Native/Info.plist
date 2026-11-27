@@ -2,7 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleDisplayName</key>
+	<key>CFBundleDevelopmentRegion</key><string>zh-Hans</string>
+    <key>CFBundleLocalizations</key><array><string>zh-Hans</string></array>
+    <key>CFBundleDisplayName</key>
 	<string>CyMusic</string>
 	<key>NSAppleMusicUsageDescription</key>
 	<string>在你点击同步后读取音乐资料库的曲目、专辑与艺人，用于本地浏览和匹配下载。不会修改系统音乐资料库。</string>

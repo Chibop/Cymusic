@@ -1,0 +1,76 @@
+import Foundation
+
+// Build alongside the same engine sources as verify-scoped-search.py, replacing
+// ScopedSearchProbe.swift with this file. Arguments: store path, preload JS path.
+private final class CatalogFixture: URLProtocol {
+    static let lock = NSLock()
+    private static var requests: [String] = []
+    static var trace: [String] { lock.withLock { requests } }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+    override func startLoading() {
+        let url = request.url!
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)!.queryItems ?? []
+        let host = url.host!
+        Self.lock.withLock { Self.requests.append(host) }
+        let json: String
+        switch host {
+        case "c.y.qq.com":
+            precondition(query.contains(URLQueryItem(name: "w", value: "Song Artist")))
+            json = #"{"data":{"song":{"list":[{"songmid":"qq-mid","songname":"Song","singer":[{"name":"Artist"}],"interval":123}]}}}"#
+        case "music.163.com":
+            precondition(query.contains(URLQueryItem(name: "s", value: "Song Artist")))
+            json = #"{"result":{"songs":[{"id":456,"name":"Song","artists":[{"name":"Artist"}],"duration":123000}]}}"#
+        default: fatalError("Unexpected network call: \(url)")
+        }
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(json.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+}
+
+@main struct ScopedCatalogMatchFixture {
+    @MainActor static func main() async throws {
+        precondition(URLProtocol.registerClass(CatalogFixture.self))
+        defer { URLProtocol.unregisterClass(CatalogFixture.self) }
+        let engine = SourceEngine(store: URL(fileURLWithPath: CommandLine.arguments[1]), preload: URL(fileURLWithPath: CommandLine.arguments[2]), matcher: { _ in fatalError("Unexpected pooled lookup") })
+        let source = """
+        lx.on(lx.EVENT_NAMES.request, async ({source,action,info}) => {
+          if (source !== 'kg' || action !== 'search' || Object.keys(info).sort().join(',') !== 'artist,keyword,title') throw Error('unexpected route or metadata');
+          const row = {id:'kg-id',title:info.title,artist:info.artist,album:'Studio',duration:123};
+          switch (info.title) {
+          case 'Live only': return [{...row,album:'Studio (Live)'}];
+          case 'Ambiguous': return [row,{...row,id:'other-id'}];
+          case 'Apple ID': return [{...row,id:'apple-id'}];
+          default: return [row];
+          }
+        });
+        lx.send(lx.EVENT_NAMES.inited,{sources:{
+          tx:{type:'music',actions:['musicUrl'],qualitys:['128k']},wy:{type:'music',actions:['musicUrl'],qualitys:['320k']},
+          kg:{type:'music',actions:['search','musicUrl'],qualitys:['128k','flac24bit']},
+          mg:{type:'music',actions:['musicUrl'],qualitys:['128k']},kw:{type:'music',actions:['search']}}});
+        """
+        try await engine.importScript(source.replacingOccurrences(of: "kg-id", with: "wrong-script"), name: "Other")
+        try await engine.importScript(source, name: "Selected")
+        let selected = engine.scripts[1]
+        let seed = Song(id: "apple-id", title: "Song", artist: "Artist", platform: "apple", album: "Studio", duration: 123)
+        for (site, id, levels) in [("tx", "qq-mid", ["128k"]), ("wy", "456", ["320k"]), ("kg", "kg-id", ["flac24bit", "128k"])] {
+            let matched = try await engine.matchCatalogSong(seed, script: selected, platform: site)
+            precondition(matched.id == id && matched.platform == site && matched.searchScriptID == selected.id)
+            let actual = try await engine.availableLevels(for: matched, script: selected)
+            precondition(actual == levels)
+            do { _ = try await engine.availableLevels(for: matched, script: engine.scripts[0]); fatalError("Accepted wrong script") }
+            catch is SourceFailure {}
+        }
+        for (site, title) in [("mg", "Song"), ("kw", "Song"), ("kg", "Live only"), ("kg", "Ambiguous"), ("kg", "Apple ID")] {
+            var input = seed
+            input.title = title
+            do { _ = try await engine.matchCatalogSong(input, script: selected, platform: site); fatalError("Accepted \(site) / \(title)") }
+            catch is SourceFailure {}
+        }
+        precondition(CatalogFixture.trace == ["c.y.qq.com", "music.163.com"])
+        print("Scoped catalog matching and declared quality levels passed")
+    }
+}
