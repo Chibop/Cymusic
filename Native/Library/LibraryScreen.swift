@@ -54,6 +54,11 @@ struct LibraryScreen: View {
   @EnvironmentObject private var playback: Playback
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @Environment(\.scenePhase) private var scenePhase
+  @Environment(\.verticalSizeClass) private var verticalSizeClass
+  @State private var wideViewport = false
+  private var immersive: Bool {
+    UIDevice.current.userInterfaceIdiom == .phone && (verticalSizeClass == .compact || wideViewport)
+  }
   @State private var collection = ShelfCollection.all
   @State private var albums: [ShelfAlbum] = []
   @State private var selected = 0
@@ -99,32 +104,32 @@ struct LibraryScreen: View {
   }
   var body: some View {
     GeometryReader { g in
-      let landscape = g.size.width > g.size.height * 1.35
-      let side = max(
-        1,
-        min(
-          landscape ? g.size.width * 0.46 : g.size.width - 26,
-          landscape ? g.size.height - 20 : g.size.height * 0.56, 560))
-      let dial = max(
-        1,
-        min(
-          landscape ? g.size.width * 0.36 : g.size.width * 0.61,
-          landscape ? g.size.height * 0.82 : g.size.height - side - 25, 270))
-      let layout =
-        landscape ? AnyLayout(HStackLayout(spacing: 26)) : AnyLayout(VStackLayout(spacing: 0))
-      layout {
-        display(side).padding(.top, landscape ? 0 : 6)
-        if !landscape { Spacer(minLength: 4) }
-        ClickWheel(
-          size: dial, songMode: inQueue, menu: menu, center: center, step: step, play: playPause)
-        if !landscape { Spacer(minLength: 4) }
-      }.frame(maxWidth: .infinity, maxHeight: .infinity)
+      Group {
+        if immersive {
+          landscapeDisplay
+        } else {
+          let width = max(1, min(g.size.width - 12, 560))
+          let height = max(1, min(g.size.height * 0.60, width * 1.16))
+          let dial = max(1, min(width * 0.61, g.size.height - height - 22, 270))
+          VStack(spacing: 0) {
+            display(width: width, height: height).padding(.top, 4)
+            Spacer(minLength: 8)
+            ClickWheel(size: dial, songMode: inQueue, menu: menu, center: center, step: step, play: playPause)
+          }
+          .padding(.bottom, max(8, (g.size.height - height - dial) * 0.30))
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .background(LinearGradient(colors: [Color(white: 0.95), Color(white: 0.82), Color(white: 0.93)],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+        }
+      }
+      .onGeometryChange(for: Bool.self) { proxy in
+        proxy.size.width > proxy.size.height * 1.35
+      } action: { wideViewport = $0 }
     }
-    .background(
-      LinearGradient(
-        colors: [Color(white: 0.95), Color(white: 0.82), Color(white: 0.93)],
-        startPoint: .topLeading, endPoint: .bottomTrailing)
-    )
+    .ignoresSafeArea(.container, edges: immersive ? .all : [])
+    .statusBarHidden(immersive)
+    .persistentSystemOverlays(immersive ? .hidden : .automatic)
+    .toolbar(immersive ? .hidden : .automatic, for: .tabBar, .navigationBar)
     .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
     .toolbarBackground(.visible, for: .navigationBar)
     .navigationTitle("Library").navigationBarTitleDisplayMode(.inline)
@@ -196,7 +201,59 @@ struct LibraryScreen: View {
     albums = ShelfAlbum.collect(library, songs: collection.tracks(in: library))
     selected = albums.firstIndex { $0.id == oldID } ?? min(selected, max(0, albums.count - 1))
   }
-  private func display(_ side: CGFloat) -> some View {
+  private var landscapeDisplay: some View {
+    VStack(spacing: 0) {
+      if count > 0 {
+        shelf(activate: playPause)
+        caption
+      } else {
+        Spacer()
+        Text("No songs yet").font(.headline)
+        Spacer()
+      }
+      Button(action: playPause) {
+        Image(systemName: inQueue && playback.isPlaying ? "pause.fill" : "play.fill")
+          .font(.title2).frame(width: 56, height: 48)
+      }
+      .buttonStyle(.plain).disabled(count == 0)
+      .accessibilityLabel("播放或暂停").accessibilityIdentifier("library.landscape.playPause")
+      .padding(.bottom, 8)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .foregroundStyle(.white)
+    .background(CoverFlowBackdrop(art: inQueue ? playback.current?.artwork : album?.art,
+                                  title: inQueue ? playback.current?.title ?? "" : album?.title ?? ""))
+  }
+
+  private func shelf(activate: @escaping () -> Void) -> some View {
+    CoverFlowShelf(count: count, focus: focus, reduceMotion: reduceMotion, step: step, activate: activate) { i in
+      Jacket(art: inQueue ? playback.queue[i].artwork : albums[i].art,
+             title: inQueue ? playback.queue[i].title : albums[i].title)
+    }
+      .accessibilityElement(children: .ignore).accessibilityLabel("Cover Flow")
+      .accessibilityValue(inQueue ? playback.current?.title ?? "" : album?.title ?? "")
+      .accessibilityAdjustableAction { step($0 == .increment ? 1 : -1) }.accessibilityAction {
+        activate()
+      }.accessibilityIdentifier("library.coverflow")
+  }
+
+  private var caption: some View {
+    ShelfCaption(raw: inQueue ? playback.current?.lyrics : nil, elapsed: playback.elapsed) {
+      VStack(spacing: 2) {
+        Text(verbatim: inQueue ? playback.current?.title ?? "" : album?.title ?? "").font(
+          .headline
+        ).accessibilityIdentifier(inQueue ? "library.currentTitle" : "library.albumTitle")
+        Text(verbatim: inQueue ? playback.current?.artist ?? "" : album?.artist ?? "").font(
+          .subheadline
+        ).foregroundStyle(Color(white: 0.76))
+        if inQueue, let badge = playback.current?.quality {
+          Text(verbatim: badge).font(.caption2.monospaced()).foregroundStyle(Color(white: 0.76))
+        }
+      }.lineLimit(1).padding(.horizontal, 8).padding(.bottom, 12).foregroundStyle(.white)
+    }
+  }
+
+  private func display(width: CGFloat, height: CGFloat) -> some View {
     let art = inQueue ? playback.current?.artwork : album?.art
     let title = inQueue ? playback.current?.title : album?.title
     return VStack(spacing: 0) {
@@ -211,28 +268,8 @@ struct LibraryScreen: View {
       .background(.regularMaterial)
       .overlay(alignment: .bottom) { Divider() }
       if count > 0 {
-        CoverFlowShelf(count: count, focus: focus, reduceMotion: reduceMotion, step: step, activate: center) { i in
-          Jacket(art: inQueue ? playback.queue[i].artwork : albums[i].art,
-                 title: inQueue ? playback.queue[i].title : albums[i].title)
-        }
-          .accessibilityElement(children: .ignore).accessibilityLabel("Cover Flow")
-          .accessibilityValue(inQueue ? playback.current?.title ?? "" : album?.title ?? "")
-          .accessibilityAdjustableAction { step($0 == .increment ? 1 : -1) }.accessibilityAction {
-            center()
-          }.accessibilityIdentifier("library.coverflow")
-        ShelfCaption(raw: inQueue ? playback.current?.lyrics : nil, elapsed: playback.elapsed) {
-          VStack(spacing: 2) {
-            Text(verbatim: inQueue ? playback.current?.title ?? "" : album?.title ?? "").font(
-              .headline
-            ).accessibilityIdentifier(inQueue ? "library.currentTitle" : "library.albumTitle")
-            Text(verbatim: inQueue ? playback.current?.artist ?? "" : album?.artist ?? "").font(
-              .subheadline
-            ).foregroundStyle(Color(white: 0.76))
-            if inQueue, let badge = playback.current?.quality {
-              Text(verbatim: badge).font(.caption2.monospaced()).foregroundStyle(Color(white: 0.76))
-            }
-          }.lineLimit(1).padding(.horizontal, 8).padding(.bottom, 12).foregroundStyle(.white)
-        }.frame(minHeight: min(80, side * 0.24)).layoutPriority(1)
+        shelf(activate: center)
+        caption.frame(minHeight: min(108, height * 0.26)).layoutPriority(1)
       } else {
         Spacer()
         Image(systemName: "music.note.list").font(.largeTitle)
@@ -240,7 +277,7 @@ struct LibraryScreen: View {
         Button("Import audio files") { pickingFiles = true }.font(.subheadline).padding(8)
         Spacer()
       }
-    }.foregroundStyle(.white).frame(width: max(1, side - 12), height: max(1, side - 12)).background(
+    }.foregroundStyle(.white).frame(width: max(1, width - 12), height: max(1, height - 12)).background(
       CoverFlowBackdrop(art: art, title: title ?? "")
     ).clipShape(RoundedRectangle(cornerRadius: 5)).padding(6)
       .background(RoundedRectangle(cornerRadius: 10).fill(Color(white: 0.14))).overlay(
@@ -259,7 +296,7 @@ private struct ShelfCaption<Metadata: View>: View {
       ZStack {
         VStack(spacing: 2) {
           neighbor(index > 0 ? lines[index - 1].text : "", id: "library.lyric.previous")
-          Text(attributed(line)).font(.subheadline.weight(.semibold)).lineLimit(1)
+          Text(attributed(line)).font(.title3.weight(.semibold)).lineLimit(2).multilineTextAlignment(.center)
             .accessibilityLabel(Text(verbatim: line.text)).accessibilityIdentifier("library.lyric")
           neighbor(index + 1 < lines.count ? lines[index + 1].text : "", id: "library.lyric.next")
         }.id(index).transition(.opacity)
@@ -272,9 +309,9 @@ private struct ShelfCaption<Metadata: View>: View {
 
   @ViewBuilder private func neighbor(_ text: String, id: String) -> some View {
     if text.isEmpty {
-      Text(verbatim: " ").font(.caption2).hidden().accessibilityHidden(true)
+      Text(verbatim: " ").font(.subheadline).hidden().accessibilityHidden(true)
     } else {
-      Text(verbatim: text).font(.caption2).lineLimit(1)
+      Text(verbatim: text).font(.subheadline).lineLimit(1)
         .foregroundStyle(Color(white: 0.67)).accessibilityIdentifier(id)
     }
   }

@@ -14,6 +14,7 @@ final class NavigationTests: XCTestCase {
         expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.descendants(matching: .any)["library.albumDetail"].firstMatch)
         waitForExpectations(timeout: 5)
         shuffle.tap()
+        XCTAssertFalse(app.buttons["mini.open"].exists)
         let lyric = app.staticTexts["library.lyric"]
         if lyric.waitForExistence(timeout: 1), lyric.label.hasPrefix("Fixture ") {
             let advanced = NSPredicate(format: "label == %@", "Fixture next")
@@ -33,12 +34,7 @@ final class NavigationTests: XCTestCase {
     func testNativeTabNavigation() throws {
         let app = XCUIApplication(); app.launchArguments += ["-AppleLanguages", "(zh-Hans)", "-app.language", "zh-Hans"]; app.launch()
         let settings = app.tabBars.buttons["设置"]
-        // iOS 26+ places the system search-role button outside the navigation pill on the right.
-        if #available(iOS 26, *) {
-            XCTAssertEqual(app.tabBars.buttons.allElementsBoundByIndex.map(\.label), ["发现", "资料库", "设置", "搜索"])
-        } else {
-            XCTAssertEqual(app.tabBars.buttons.allElementsBoundByIndex.map(\.label), ["发现", "资料库", "搜索", "设置"])
-        }
+        XCTAssertEqual(app.tabBars.buttons.allElementsBoundByIndex.map(\.label), ["发现", "资料库", "搜索", "设置"])
         XCTAssertTrue(settings.waitForExistence(timeout: 10)); settings.tap()
         let sources = app.buttons["自定义音源"]
         XCTAssertTrue(sources.waitForExistence(timeout: 4)); sources.tap()

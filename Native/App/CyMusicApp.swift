@@ -36,6 +36,8 @@ struct RootScreen: View {
     @EnvironmentObject private var engine: SourceEngine
     @AppStorage("appearance") private var appearance = 0
     @AppStorage(AppLanguage.storageKey) private var language = AppLanguage.system
+    private enum Page: Hashable { case discovery, library, search, settings }
+    @State private var page = Page.discovery
     @State private var playerShown = false
     var body: some View {
         shell
@@ -47,31 +49,31 @@ struct RootScreen: View {
     }
     @ViewBuilder private var shell: some View {
         if #available(iOS 26.1, *) {
-            modernTabs.tabViewBottomAccessory(isEnabled: playback.current != nil) { accessory }
+            modernTabs.tabViewBottomAccessory(isEnabled: page != .library && playback.current != nil) { accessory }
         } else if #available(iOS 26.0, *) {
             modernTabs.tabViewBottomAccessory { accessory }
         } else {
             legacyTabs.safeAreaInset(edge: .bottom, spacing: 0) {
-                if let song = playback.current { player(song, compact: false).background(.regularMaterial) }
+                if page != .library, let song = playback.current { player(song, compact: false).background(.regularMaterial) }
             }
         }
     }
 
     @available(iOS 26.0, *) private var modernTabs: some View {
-        TabView {
-            Tab("发现", systemImage: "music.note") { NavigationStack { DiscoveryScreen() } }
-            Tab("资料库", systemImage: "music.note.list") { NavigationStack { LibraryScreen() } }
-            Tab("搜索", systemImage: "magnifyingglass", role: .search) { NavigationStack { SearchScreen() } }
-            Tab("设置", systemImage: "gearshape") { settings }
+        TabView(selection: $page) {
+            Tab("发现", systemImage: "music.note", value: Page.discovery) { NavigationStack { DiscoveryScreen() } }
+            Tab("资料库", systemImage: "music.note.list", value: Page.library) { NavigationStack { LibraryScreen() } }
+            Tab("搜索", systemImage: "magnifyingglass", value: Page.search) { NavigationStack { SearchScreen() } }
+            Tab("设置", systemImage: "gearshape", value: Page.settings) { settings }
         }.tabBarMinimizeBehavior(.onScrollDown).tint(.blue)
     }
 
     private var legacyTabs: some View {
-        TabView {
-            NavigationStack { DiscoveryScreen() }.tabItem { Label("发现", systemImage: "music.note") }
-            NavigationStack { LibraryScreen() }.tabItem { Label("资料库", systemImage: "music.note.list") }
-            NavigationStack { SearchScreen() }.tabItem { Label("搜索", systemImage: "magnifyingglass") }
-            settings.tabItem { Label("设置", systemImage: "gearshape") }
+        TabView(selection: $page) {
+            NavigationStack { DiscoveryScreen() }.tabItem { Label("发现", systemImage: "music.note") }.tag(Page.discovery)
+            NavigationStack { LibraryScreen() }.tabItem { Label("资料库", systemImage: "music.note.list") }.tag(Page.library)
+            NavigationStack { SearchScreen() }.tabItem { Label("搜索", systemImage: "magnifyingglass") }.tag(Page.search)
+            settings.tabItem { Label("设置", systemImage: "gearshape") }.tag(Page.settings)
         }.tint(.blue)
     }
 
@@ -81,13 +83,14 @@ struct RootScreen: View {
                 Section("播放来源") { NavigationLink { SourcesScreen() } label: { Label("自定义音源", systemImage: "dot.radiowaves.left.and.right") } }
                 Section { LanguagePicker() }
                 Section("音乐资料库") { NavigationLink { AppleLibraryScreen() } label: { Label("同步 Apple Music 资料库", systemImage: "arrow.triangle.2.circlepath") } }
+                Section("专辑封面") { AlbumCoverSyncButton() }
                 Section("外观") { Picker("主题", selection: $appearance) { Text("跟随系统").tag(0); Text("浅色").tag(1); Text("深色").tag(2) } }
             }.navigationTitle("设置")
         }
     }
 
     @available(iOS 26.0, *) @ViewBuilder private var accessory: some View {
-        if let song = playback.current {
+        if page != .library, let song = playback.current {
             AccessoryLayout { compact in player(song, compact: compact) }
         }
     }

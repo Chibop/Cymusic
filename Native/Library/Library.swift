@@ -34,6 +34,9 @@ final class Library: ObservableObject {
   @Published private var store = Store()
   @Published private(set) var localSongs: [Song] = []
   @Published private(set) var artworkRevision = 0
+  #if os(iOS) || ALBUM_COVER_SYNC_TESTS
+    let albumCoverSync = AlbumCoverSync()
+  #endif
   private var indexing = false
   private var needsIndex = false
   @Published var message: String?

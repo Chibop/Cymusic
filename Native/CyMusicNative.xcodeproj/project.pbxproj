@@ -26,6 +26,7 @@
 		6C45CFB7B8C567B2F2D61171 /* DiscoveryCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5094B40B17CB8147D568371 /* DiscoveryCatalog.swift */; };
 		6E7D8B3AE9C66EA610DB394A /* JavaScriptCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 04A05074FE7B9C9AAF268768 /* JavaScriptCore.framework */; };
 		763199D6BFEEC9EE915408EE /* Library.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEB5C4FA9DAC6661427C7DEB /* Library.swift */; };
+		7AC43DD7B0ED3853F32B4240 /* AlbumCoverSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C64D8F5C139891815ABD597 /* AlbumCoverSync.swift */; };
 		7CE1C13D8A81828248C71476 /* DownloadCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94CC8A9B495E0E9FA15B55B4 /* DownloadCenter.swift */; };
 		82FB00DC0615B02EC80D594B /* SyncedLyricsTimingChecks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 463252FB3A09DA1E23273AB5 /* SyncedLyricsTimingChecks.swift */; };
 		8860BF8515FD064B5FF5FF97 /* DownloadedAudioCleanup.swift in Sources */ = {isa = PBXBuildFile; fileRef = E28D933E69BFF664D931D934 /* DownloadedAudioCleanup.swift */; };
@@ -36,11 +37,14 @@
 		933ED63D17BADB0ED441F0BD /* LibraryScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFEFE2F023E902DF4ABB94B3 /* LibraryScreen.swift */; };
 		99ACB778E89CB161A1D83CEB /* SharedSourceReceiver.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD34FB76DD2F620CAE09EEA9 /* SharedSourceReceiver.swift */; };
 		A095823BBC0C613B2D01882C /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B437B91F473C55AB2AC8E505 /* ShareViewController.swift */; };
+		A0ED1B4480791F91FF26118F /* AlbumCoverSyncFixtureChecks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2391A84C728AB05C6BAE15F8 /* AlbumCoverSyncFixtureChecks.swift */; };
 		A55F71D288EF57E592A73107 /* CoverFlowShelf.swift in Sources */ = {isa = PBXBuildFile; fileRef = 514FD58C7CCA7F8FB284631E /* CoverFlowShelf.swift */; };
 		AC56CACDC275050176326F8D /* SourceScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C8BEEE88E58A3059EA33C07 /* SourceScreens.swift */; };
 		AE3F487767DE6E6DAC561D6D /* LegacyMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 127CD6D3784818507527AB96 /* LegacyMigration.swift */; };
+		AEE255EE8FEA587151188E53 /* AlbumCoverSyncButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 820C8C9172437F16BCF02DBB /* AlbumCoverSyncButton.swift */; };
 		B6CEE390DD754F437891A1B4 /* PlaybackMedia.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82C491E5D131CC4F8D3577C2 /* PlaybackMedia.swift */; };
 		BFBB44AB1528A6CA6F6B790A /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 4920379E5DC7D7CA2895B614 /* Localizable.strings */; };
+		C26EAEBEA0A27F5C40B7DAE0 /* LibraryRotationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96A4CACA08154F20BA95E707 /* LibraryRotationTests.swift */; };
 		D8F165E9C26EAB9D6D0E5238 /* user-api-preload.js in Resources */ = {isa = PBXBuildFile; fileRef = 5E5EC19FD8A1E2B67F336C60 /* user-api-preload.js */; };
 		DDB2DBF24D113133E3846A68 /* Song.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03FD87B1E7CDB6B6253F63D7 /* Song.swift */; };
 		E68240496C36ED6B125BB747 /* LanguageSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 577C1EF69144019212BF1E51 /* LanguageSettings.swift */; };
@@ -95,11 +99,13 @@
 		13D29968316A67087268F36F /* SearchScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchScreen.swift; sourceTree = "<group>"; };
 		2101E01BAEA5D1CAC9ABFD44 /* SourceEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceEngine.swift; sourceTree = "<group>"; };
 		21BCD60D60272E20F16D0789 /* Catalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Catalog.swift; sourceTree = "<group>"; };
+		2391A84C728AB05C6BAE15F8 /* AlbumCoverSyncFixtureChecks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumCoverSyncFixtureChecks.swift; sourceTree = "<group>"; };
 		2C8BEEE88E58A3059EA33C07 /* SourceScreens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceScreens.swift; sourceTree = "<group>"; };
 		313376DB645DA323DC9FF7ED /* CyMusic.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = CyMusic.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		361D8F59FEF4577C76E699CE /* ArtworkPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtworkPickerSheet.swift; sourceTree = "<group>"; };
 		364291DFBED8A1FCD1C3F493 /* CyMusicApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CyMusicApp.swift; sourceTree = "<group>"; };
 		3A3B804C1EF5CB5E40624ED0 /* AppleLibrarySnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleLibrarySnapshot.swift; sourceTree = "<group>"; };
+		3C64D8F5C139891815ABD597 /* AlbumCoverSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumCoverSync.swift; sourceTree = "<group>"; };
 		463252FB3A09DA1E23273AB5 /* SyncedLyricsTimingChecks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncedLyricsTimingChecks.swift; sourceTree = "<group>"; };
 		514FD58C7CCA7F8FB284631E /* CoverFlowShelf.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoverFlowShelf.swift; sourceTree = "<group>"; };
 		577C1EF69144019212BF1E51 /* LanguageSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LanguageSettings.swift; sourceTree = "<group>"; };
@@ -108,11 +114,13 @@
 		659E3197CF737B8E13EA6D61 /* CyMusicUserApiRuntime.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = CyMusicUserApiRuntime.m; sourceTree = "<group>"; };
 		67B3D9AC8610D0720F0E0210 /* Playback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Playback.swift; sourceTree = "<group>"; };
 		727EC6D8C37057E239971293 /* ProviderSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderSession.swift; sourceTree = "<group>"; };
+		820C8C9172437F16BCF02DBB /* AlbumCoverSyncButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumCoverSyncButton.swift; sourceTree = "<group>"; };
 		82C491E5D131CC4F8D3577C2 /* PlaybackMedia.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackMedia.swift; sourceTree = "<group>"; };
 		8540F25DDB6F9DEA59516E00 /* AlbumCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumCatalog.swift; sourceTree = "<group>"; };
 		8B7B2538BB639B548164CA0B /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Images.xcassets; sourceTree = "<group>"; };
 		8C4513647F7B0FE2F940329E /* ArtworkCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtworkCatalog.swift; sourceTree = "<group>"; };
 		94CC8A9B495E0E9FA15B55B4 /* DownloadCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadCenter.swift; sourceTree = "<group>"; };
+		96A4CACA08154F20BA95E707 /* LibraryRotationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryRotationTests.swift; sourceTree = "<group>"; };
 		9829C7EE0CC7929CE948057E /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		9CB5E862940289CF142A58E3 /* PlayerScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerScreen.swift; sourceTree = "<group>"; };
 		A2532A5DE75D08295B08AD60 /* MMKV */ = {isa = PBXFileReference; lastKnownFileType = folder; name = MMKV; path = Vendor/MMKV; sourceTree = SOURCE_ROOT; };
@@ -244,6 +252,9 @@
 			isa = PBXGroup;
 			children = (
 				8540F25DDB6F9DEA59516E00 /* AlbumCatalog.swift */,
+				3C64D8F5C139891815ABD597 /* AlbumCoverSync.swift */,
+				820C8C9172437F16BCF02DBB /* AlbumCoverSyncButton.swift */,
+				2391A84C728AB05C6BAE15F8 /* AlbumCoverSyncFixtureChecks.swift */,
 				8C4513647F7B0FE2F940329E /* ArtworkCatalog.swift */,
 				361D8F59FEF4577C76E699CE /* ArtworkPickerSheet.swift */,
 				CB50860851865097F51E9617 /* ArtworkTests.swift */,
@@ -268,6 +279,7 @@
 		ABD0432FB2B1A02D5BAB6013 /* UITests */ = {
 			isa = PBXGroup;
 			children = (
+				96A4CACA08154F20BA95E707 /* LibraryRotationTests.swift */,
 				ED65D1641B9C686F1380359C /* NavigationTests.swift */,
 			);
 			path = UITests;
@@ -447,6 +459,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				8FCC1FC74E89287F3C0477BD /* AlbumCatalog.swift in Sources */,
+				7AC43DD7B0ED3853F32B4240 /* AlbumCoverSync.swift in Sources */,
+				AEE255EE8FEA587151188E53 /* AlbumCoverSyncButton.swift in Sources */,
+				A0ED1B4480791F91FF26118F /* AlbumCoverSyncFixtureChecks.swift in Sources */,
 				FAB194920D8DF52BAE0CB360 /* AppleLibraryFixtureChecks.swift in Sources */,
 				3541A40650176FAF8A683C30 /* AppleLibraryScreen.swift in Sources */,
 				28B2F3BDA87D50E6188F5142 /* AppleLibrarySnapshot.swift in Sources */,
@@ -487,6 +502,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C26EAEBEA0A27F5C40B7DAE0 /* LibraryRotationTests.swift in Sources */,
 				6AC3FB3F3B58E05A410D2555 /* NavigationTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -562,7 +578,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 6;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -582,7 +598,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
-				MARKETING_VERSION = 1.6.0;
+				MARKETING_VERSION = 1.7.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -630,7 +646,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 5;
+				CURRENT_PROJECT_VERSION = 6;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -644,7 +660,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
-				MARKETING_VERSION = 1.6.0;
+				MARKETING_VERSION = 1.7.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
