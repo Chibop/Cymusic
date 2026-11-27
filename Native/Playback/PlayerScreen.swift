@@ -4,7 +4,8 @@ import SwiftUI
 struct PlayerScreen: View {
   @EnvironmentObject var playback: Playback
   @Environment(\.dismiss) private var dismiss
-  @State private var lyrics = true
+  @State private var lyrics = false
+  @State private var artwork: UIImage?
   @State private var picker: LyricPickerContext?
   @State private var showQueue = false
   @State private var scrub: Double?
@@ -17,51 +18,45 @@ struct PlayerScreen: View {
     GeometryReader { geo in
       ZStack {
         Color(red: 0.10, green: 0.13, blue: 0.14)
-        if let url = playback.current?.artwork {
-          AsyncImage(url: url) { image in
-            image.resizable().scaledToFill()
-          } placeholder: {
-            Color.clear
-          }.frame(width: geo.size.width, height: geo.size.height).blur(radius: 55).clipped()
+        if let artwork {
+          Image(uiImage: artwork).resizable().scaledToFill().frame(width: geo.size.width, height: geo.size.height).blur(radius: 55).clipped()
             .accessibilityHidden(true)
         }
         LinearGradient(
           colors: [.black.opacity(0.35), .black.opacity(0.78)], startPoint: .top, endPoint: .bottom)
       }.ignoresSafeArea()
       VStack(spacing: 0) {
-        Button {
-          dismiss()
-        } label: {
-          Capsule().fill(.secondary).frame(width: 38, height: 5).frame(width: 80, height: 44)
-        }.accessibilityLabel("收起播放器")
+        icon("chevron.down", "收起播放器", 17) { dismiss() }
+          .accessibilityIdentifier("player.dismiss")
         if playback.current == nil {
           Spacer()
           Image(systemName: "music.note.list").font(.largeTitle)
           Text("还没有正在播放的歌曲").padding()
           Spacer()
-        } else if lyrics {
-          PlaybackLyrics(
-            raw: playback.current?.lyrics, elapsed: playback.elapsed, size: lyricSize,
-            offset: lyricOffset, seek: playback.seek).id(playback.current?.lyrics)
-          HStack {
-            icon("rectangle.stack", "返回封面") { lyrics = false }
-            Spacer()
-            Button("歌词版本") {
-              if let song = playback.current { picker = LyricPickerContext(id: playback.generation, song: song) }
-            }
-            Spacer()
-            lyricMenu
-          }.padding(.horizontal, 26)
-        } else {
+        } else if let song = playback.current {
           ScrollView {
             VStack(spacing: 16) {
               Spacer(minLength: 0)
-              albumArt.frame(
-                width: min(geo.size.width - 64, max(120, geo.size.height * 0.41)),
-                height: min(geo.size.width - 64, max(120, geo.size.height * 0.41))
-              ).clipShape(RoundedRectangle(cornerRadius: 12)).shadow(
-                color: .black.opacity(0.3), radius: 12, y: 8
-              ).accessibilityHidden(true)
+              let side = min(geo.size.width - 64, max(120, geo.size.height * 0.41))
+              Group {
+                if lyrics {
+                  VStack(spacing: 0) {
+                    PlaybackLyrics(raw: song.lyrics, elapsed: playback.elapsed, size: lyricSize,
+                                   offset: lyricOffset, seek: playback.seek)
+                    HStack {
+                      Button { picker = LyricPickerContext(id: playback.generation, song: song) } label: {
+                        Text("歌词版本").frame(minHeight: 44)
+                      }
+                      Spacer()
+                      lyricMenu
+                    }
+                  }
+                } else {
+                  albumArt.frame(width: side, height: side)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .shadow(color: .black.opacity(0.3), radius: 12, y: 8).accessibilityHidden(true)
+                }
+              }.frame(height: side)
               Spacer(minLength: 0)
               HStack {
                 VStack(alignment: .leading, spacing: 3) {
@@ -71,7 +66,7 @@ struct PlayerScreen: View {
                   if let source = playback.current?.audioSource { Text("音频来源：\(source)").font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                 }
                 Spacer()
-                options
+                PlayerDownloadButton(song: song, caching: playback.caching)
               }
               if let error = playback.errorMessage {
                 Button {
@@ -122,7 +117,8 @@ struct PlayerScreen: View {
                 Image(systemName: "speaker.wave.3.fill")
               }.font(.caption).foregroundStyle(.secondary)
               HStack {
-                icon("quote.bubble", "歌词") { lyrics = true }
+                icon(lyrics ? "quote.bubble.fill" : "quote.bubble", lyrics ? "返回封面" : "歌词") { lyrics.toggle() }
+                  .accessibilityIdentifier("player.lyrics")
                 Spacer()
                 Menu {
                   ForEach(PlaybackMode.allCases, id: \.self) { mode in
@@ -141,11 +137,17 @@ struct PlayerScreen: View {
               }
             }.padding(.horizontal, min(geo.size.width * 0.08, 48)).frame(maxWidth: 610).frame(
               minHeight: max(0, geo.size.height - 50)
-            ).frame(maxWidth: .infinity)
+            ).frame(maxWidth: .infinity).padding(.bottom, 6)
           }.scrollIndicators(.hidden)
         }
       }.foregroundStyle(.white).tint(.white).buttonStyle(.plain).frame(
         width: geo.size.width, height: geo.size.height)
+    }.accessibilityAction(.escape) { dismiss() }
+    .task(id: playback.current?.artwork) {
+      artwork = nil
+      guard let url = playback.current?.artwork else { return }
+      let sample = await CoverFlowArtwork.shared.sample(url)
+      if !Task.isCancelled { artwork = sample?.image }
     }.environment(\.colorScheme, .dark).sheet(isPresented: $showQueue) {
       PlaybackQueue().environmentObject(playback)
     }.sheet(item: $picker) { context in
@@ -175,12 +177,8 @@ struct PlayerScreen: View {
       Color(red: 0.17, green: 0.22, blue: 0.23)
       Image(systemName: "opticaldisc").resizable().scaledToFit().padding(48).foregroundStyle(
         .white.opacity(0.28))
-      if let url = playback.current?.artwork {
-        AsyncImage(url: url) { image in
-          image.resizable().scaledToFill()
-        } placeholder: {
-          Color.clear
-        }
+      if let artwork {
+        Image(uiImage: artwork).resizable().scaledToFill()
       }
     }
   }
@@ -195,33 +193,6 @@ struct PlayerScreen: View {
   private func icon(
     _ name: String, _ title: String, _ size: Double = 20, _ action: @escaping () -> Void
   ) -> some View { Button(action: action) { glyph(name, size) }.accessibilityLabel(title) }
-  private var options: some View {
-    Menu {
-      Button {
-        playback.cacheCurrent()
-      } label: {
-        Label(
-          playback.offline ? "已在本地" : playback.caching ? "正在缓存…" : "缓存到本地",
-          systemImage: "arrow.down.circle")
-      }.disabled(playback.offline || playback.caching || playback.loading)
-      if let message = playback.cacheMessage { Text(message) }
-      Toggle("自动缓存", isOn: $playback.autoCache)
-      Toggle("精确跳转", isOn: $playback.preciseSeeking)
-      Menu {
-        ForEach([5, 10, 15, 30, 45, 60, 90], id: \.self) { n in
-          Button("\(n) 分钟") { playback.sleep(minutes: n) }
-        }
-        Button("播完当前歌曲") { playback.sleepAtEnd() }
-        Button("关闭定时") { playback.sleep(minutes: nil) }
-      } label: {
-        Label(
-          playback.sleepUntil.map { "定时至 " + $0.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(L10n.locale)) }
-            ?? (playback.sleepAfterTrack ? "播完当前歌曲后停止" : "定时关闭"), systemImage: "moon.zzz")
-      }
-    } label: {
-      glyph("ellipsis.circle")
-    }.accessibilityLabel("播放选项")
-  }
   private var lyricMenu: some View {
     Menu {
       ControlGroup {
@@ -237,6 +208,41 @@ struct PlayerScreen: View {
     } label: {
       glyph("textformat.size")
     }.accessibilityLabel("歌词设置")
+  }
+}
+
+private struct PlayerDownloadButton: View {
+  @EnvironmentObject private var downloads: DownloadCenter
+  let song: Song
+  let caching: Bool
+
+  var body: some View {
+    let key = DownloadCenter.Key(song)
+    let cached = downloads.localFile(song) != nil
+    let pending = downloads.pending.contains(key)
+    let paused = pending && downloads.isPaused
+    let busy = pending || caching
+    let failure = downloads.failures[key]
+    let progress = downloads.progress(for: song)
+    let title = cached ? "已下载" : paused ? "继续下载" : busy ? "正在下载" : failure == nil ? "下载" : "重试下载"
+    Button {
+      if paused { downloads.resume() } else { downloads.enqueue([song]) }
+    } label: {
+      Group {
+        if cached { Image(systemName: "checkmark.circle.fill") }
+        else if paused { Image(systemName: "play.circle") }
+        else if busy { ProgressView(value: progress).progressViewStyle(.circular) }
+        else if failure != nil {
+          VStack(spacing: 2) {
+            Image(systemName: "arrow.clockwise.circle")
+            Text("重试下载").font(.caption2)
+          }
+        } else { Image(systemName: "arrow.down.circle") }
+      }.font(.title2).frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+    }.disabled(cached || (busy && !paused))
+      .accessibilityLabel(Text(title))
+      .accessibilityValue(Text(cached ? "" : progress?.formatted(.percent) ?? failure ?? ""))
+      .accessibilityIdentifier("player.download")
   }
 }
 
@@ -314,7 +320,9 @@ private struct PlaybackQueue: View {
             }
           }.accessibilityAddTraits(i == playback.index ? .isSelected : [])
         }.onDelete { offsets in for i in offsets.sorted(by: >) { playback.remove(at: i) } }
-      }.navigationTitle("播放队列").navigationBarTitleDisplayMode(.inline).toolbar {
+      }.scrollContentBackground(.hidden)
+      .background(Color(uiColor: .systemGroupedBackground))
+      .navigationTitle("播放队列").navigationBarTitleDisplayMode(.inline).toolbar {
         ToolbarItem(placement: .cancellationAction) { Button("完成") { dismiss() } }
         ToolbarItem(placement: .primaryAction) {
           Button("清空", role: .destructive) { confirm = true }.disabled(playback.queue.isEmpty)
@@ -325,6 +333,7 @@ private struct PlaybackQueue: View {
           dismiss()
         }
       }
-    }.presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+    }.presentationBackground(Color(uiColor: .systemGroupedBackground))
+      .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
   }
 }

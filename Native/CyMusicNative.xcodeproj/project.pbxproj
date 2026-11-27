@@ -9,10 +9,13 @@
 /* Begin PBXBuildFile section */
 		05E46E5BC35AB9BEC9A32C5F /* PlayerScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CB5E862940289CF142A58E3 /* PlayerScreen.swift */; };
 		1286AB1E87F3804035E75BF0 /* MMKV in Frameworks */ = {isa = PBXBuildFile; productRef = 5006D966925C4B7FA74443FB /* MMKV */; };
+		1A048AD0F636F74B6AD00D67 /* Lanyue-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 7B594F83E305A5AAFB2B8576 /* Lanyue-LICENSE.txt */; };
 		1D1F1F204CF8440FE0E73998 /* ScopedSearchProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C6D7CE8AEA212BCBA696B95 /* ScopedSearchProbe.swift */; };
 		28B2F3BDA87D50E6188F5142 /* AppleLibrarySnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A3B804C1EF5CB5E40624ED0 /* AppleLibrarySnapshot.swift */; };
 		2F7E5BDA39BE8B774948888C /* CyMusicShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F5A6C410181D5358EF749B60 /* CyMusicShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		34B5D3EFC0CD254B4E79CB57 /* PlaylistSheetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E2595E245EBCC61F736EB3B /* PlaylistSheetTests.swift */; };
 		3541A40650176FAF8A683C30 /* AppleLibraryScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8580840BEA2D793AF0F2D63 /* AppleLibraryScreen.swift */; };
+		3B207BBA7A8AC0EF9B256C25 /* PlaylistCover.swift in Sources */ = {isa = PBXBuildFile; fileRef = A935719587E846A569E09A17 /* PlaylistCover.swift */; };
 		3D2972C88CF63CC10767344D /* Catalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21BCD60D60272E20F16D0789 /* Catalog.swift */; };
 		3D56442D838445837BFA7F56 /* Playback.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67B3D9AC8610D0720F0E0210 /* Playback.swift */; };
 		3D639C342B0D45221D84E76B /* check.py in Resources */ = {isa = PBXBuildFile; fileRef = DD72E4F26A79AC010F95F059 /* check.py */; };
@@ -45,6 +48,7 @@
 		99ACB778E89CB161A1D83CEB /* SharedSourceReceiver.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD34FB76DD2F620CAE09EEA9 /* SharedSourceReceiver.swift */; };
 		A095823BBC0C613B2D01882C /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B437B91F473C55AB2AC8E505 /* ShareViewController.swift */; };
 		A0ED1B4480791F91FF26118F /* AlbumCoverSyncFixtureChecks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2391A84C728AB05C6BAE15F8 /* AlbumCoverSyncFixtureChecks.swift */; };
+		A38DEC3A3D307836B5796461 /* PlaylistSongPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADCDD013A1FA98D939C9C119 /* PlaylistSongPicker.swift */; };
 		A55F71D288EF57E592A73107 /* CoverFlowShelf.swift in Sources */ = {isa = PBXBuildFile; fileRef = 514FD58C7CCA7F8FB284631E /* CoverFlowShelf.swift */; };
 		AC56CACDC275050176326F8D /* SourceScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C8BEEE88E58A3059EA33C07 /* SourceScreens.swift */; };
 		AE3F487767DE6E6DAC561D6D /* LegacyMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 127CD6D3784818507527AB96 /* LegacyMigration.swift */; };
@@ -104,6 +108,7 @@
 		11610CCBD6A95F6AB96932F8 /* PoolMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PoolMatcher.swift; sourceTree = "<group>"; };
 		127CD6D3784818507527AB96 /* LegacyMigration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyMigration.swift; sourceTree = "<group>"; };
 		13D29968316A67087268F36F /* SearchScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchScreen.swift; sourceTree = "<group>"; };
+		1E2595E245EBCC61F736EB3B /* PlaylistSheetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistSheetTests.swift; sourceTree = "<group>"; };
 		2101E01BAEA5D1CAC9ABFD44 /* SourceEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceEngine.swift; sourceTree = "<group>"; };
 		21BCD60D60272E20F16D0789 /* Catalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Catalog.swift; sourceTree = "<group>"; };
 		2391A84C728AB05C6BAE15F8 /* AlbumCoverSyncFixtureChecks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumCoverSyncFixtureChecks.swift; sourceTree = "<group>"; };
@@ -124,6 +129,7 @@
 		67B3D9AC8610D0720F0E0210 /* Playback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Playback.swift; sourceTree = "<group>"; };
 		727EC6D8C37057E239971293 /* ProviderSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderSession.swift; sourceTree = "<group>"; };
 		731830560753042E3DA001C6 /* ScopedSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScopedSearch.swift; sourceTree = "<group>"; };
+		7B594F83E305A5AAFB2B8576 /* Lanyue-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Lanyue-LICENSE.txt"; sourceTree = "<group>"; };
 		820C8C9172437F16BCF02DBB /* AlbumCoverSyncButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumCoverSyncButton.swift; sourceTree = "<group>"; };
 		82C491E5D131CC4F8D3577C2 /* PlaybackMedia.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackMedia.swift; sourceTree = "<group>"; };
 		8540F25DDB6F9DEA59516E00 /* AlbumCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlbumCatalog.swift; sourceTree = "<group>"; };
@@ -138,6 +144,8 @@
 		A2532A5DE75D08295B08AD60 /* MMKV */ = {isa = PBXFileReference; lastKnownFileType = folder; name = MMKV; path = Vendor/MMKV; sourceTree = SOURCE_ROOT; };
 		A3B579ED297AD26CA242E775 /* DiscoveryCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoveryCache.swift; sourceTree = "<group>"; };
 		A5094B40B17CB8147D568371 /* DiscoveryCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoveryCatalog.swift; sourceTree = "<group>"; };
+		A935719587E846A569E09A17 /* PlaylistCover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistCover.swift; sourceTree = "<group>"; };
+		ADCDD013A1FA98D939C9C119 /* PlaylistSongPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaylistSongPicker.swift; sourceTree = "<group>"; };
 		B437B91F473C55AB2AC8E505 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		B8580840BEA2D793AF0F2D63 /* AppleLibraryScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleLibraryScreen.swift; sourceTree = "<group>"; };
 		C2FF79BDE3A5E7BBAF2C1868 /* CoverFlowArtwork.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoverFlowArtwork.swift; sourceTree = "<group>"; };
@@ -202,6 +210,7 @@
 			isa = PBXGroup;
 			children = (
 				21BCD60D60272E20F16D0789 /* Catalog.swift */,
+				7B594F83E305A5AAFB2B8576 /* Lanyue-LICENSE.txt */,
 				F15D976F40E2BF7589E0B6BF /* PoolCatalog.swift */,
 				11610CCBD6A95F6AB96932F8 /* PoolMatcher.swift */,
 				727EC6D8C37057E239971293 /* ProviderSession.swift */,
@@ -279,6 +288,8 @@
 				127CD6D3784818507527AB96 /* LegacyMigration.swift */,
 				DEB5C4FA9DAC6661427C7DEB /* Library.swift */,
 				DFEFE2F023E902DF4ABB94B3 /* LibraryScreen.swift */,
+				A935719587E846A569E09A17 /* PlaylistCover.swift */,
+				ADCDD013A1FA98D939C9C119 /* PlaylistSongPicker.swift */,
 				463252FB3A09DA1E23273AB5 /* SyncedLyricsTimingChecks.swift */,
 			);
 			path = Library;
@@ -298,6 +309,7 @@
 				9F4DF4AB00E569C60D9A29FF /* CatalogSearchTests.swift */,
 				96A4CACA08154F20BA95E707 /* LibraryRotationTests.swift */,
 				ED65D1641B9C686F1380359C /* NavigationTests.swift */,
+				1E2595E245EBCC61F736EB3B /* PlaylistSheetTests.swift */,
 			);
 			path = UITests;
 			sourceTree = "<group>";
@@ -475,6 +487,7 @@
 			files = (
 				853614E58C43C98545B728F9 /* Checks.swiftfixture in Resources */,
 				4F1465796911F879633B77EA /* Images.xcassets in Resources */,
+				1A048AD0F636F74B6AD00D67 /* Lanyue-LICENSE.txt in Resources */,
 				BFBB44AB1528A6CA6F6B790A /* Localizable.strings in Resources */,
 				3D639C342B0D45221D84E76B /* check.py in Resources */,
 				D8F165E9C26EAB9D6D0E5238 /* user-api-preload.js in Resources */,
@@ -518,6 +531,8 @@
 				3D56442D838445837BFA7F56 /* Playback.swift in Sources */,
 				B6CEE390DD754F437891A1B4 /* PlaybackMedia.swift in Sources */,
 				05E46E5BC35AB9BEC9A32C5F /* PlayerScreen.swift in Sources */,
+				3B207BBA7A8AC0EF9B256C25 /* PlaylistCover.swift in Sources */,
+				A38DEC3A3D307836B5796461 /* PlaylistSongPicker.swift in Sources */,
 				6913E2B52C835B5609E56286 /* PoolCatalog.swift in Sources */,
 				8A4DC4E753DADBDD8291768B /* PoolMatcher.swift in Sources */,
 				F59D0D1985E28FF418421D86 /* ProviderSession.swift in Sources */,
@@ -539,6 +554,7 @@
 				9893C4EB1AE7FC2260E72037 /* CatalogSearchTests.swift in Sources */,
 				C26EAEBEA0A27F5C40B7DAE0 /* LibraryRotationTests.swift in Sources */,
 				6AC3FB3F3B58E05A410D2555 /* NavigationTests.swift in Sources */,
+				34B5D3EFC0CD254B4E79CB57 /* PlaylistSheetTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -613,7 +629,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 10;
+				CURRENT_PROJECT_VERSION = 11;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -633,7 +649,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
-				MARKETING_VERSION = 1.9.1;
+				MARKETING_VERSION = 1.10.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -681,7 +697,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 10;
+				CURRENT_PROJECT_VERSION = 11;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -695,7 +711,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.4;
-				MARKETING_VERSION = 1.9.1;
+				MARKETING_VERSION = 1.10.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";

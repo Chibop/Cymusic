@@ -39,14 +39,7 @@ enum PlaybackMode: String, CaseIterable {
   @Published var mode =
     PlaybackMode(rawValue: UserDefaults.standard.string(forKey: "playback.mode") ?? "") ?? .queue
   { didSet { UserDefaults.standard.set(mode.rawValue, forKey: "playback.mode") } }
-  @Published var autoCache =
-    (UserDefaults.standard.object(forKey: "playback.autoCache") as? Bool) ?? true
-  {
-    didSet {
-      UserDefaults.standard.set(autoCache, forKey: "playback.autoCache")
-      if autoCache { cacheCurrent() }
-    }
-  }
+
   @Published var preciseSeeking = UserDefaults.standard.bool(forKey: "playback.preciseSeeking") {
     didSet { UserDefaults.standard.set(preciseSeeking, forKey: "playback.preciseSeeking") }
   }
@@ -294,8 +287,7 @@ enum PlaybackMode: String, CaseIterable {
     if isPlaying != playing {
       isPlaying = playing
       nowPlaying()
-      // Do not start a second full-file transfer while AVPlayer is buffering its first audio.
-      if playing && autoCache && !offline && !caching && current?.requestedQuality == nil { cacheCurrent() }
+
     }
     loading =
       wantsAudio && !playing && errorMessage == nil

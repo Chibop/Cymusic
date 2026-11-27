@@ -41,7 +41,7 @@ struct RootScreen: View {
     @State private var playerShown = false
     var body: some View {
         shell
-            .sheet(isPresented: $playerShown) { PlayerScreen().presentationDragIndicator(.visible) }
+            .sheet(isPresented: $playerShown) { PlayerScreen().presentationDragIndicator(.hidden) }
             .preferredColorScheme(appearance == 0 ? nil : appearance == 1 ? .light : .dark)
             .onChange(of: library.artworkRevision) { _ in playback.refreshArtwork { library.artworkOverride(for: $0) } }
             .receiveSharedSource { text, name in try await engine.importScript(text, name: name) }

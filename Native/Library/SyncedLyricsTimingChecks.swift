@@ -24,7 +24,35 @@
     precondition(reversed.text == "AB" && reversed.parts.isEmpty)
     let delayed = ShelfLyrics.parse("[offset:-150]\n[00:00:125]delayed")[0]
     precondition(delayed.time == 0.275)
+    checkShelfGaps()
     print("Synced lyrics timing boundaries passed")
+  }
+
+  @MainActor private static func checkShelfGaps() {
+    let song = """
+      [00:00]
+      [00:01]First line
+      [00:02]
+      [00:03]<00:03> <00:03.5>
+      [00:04]<00:04>Second <00:05>line<00:06>
+      [00:07]
+      """
+    func caption(_ raw: String?, at time: Double) -> ShelfLyrics.Line? {
+      let lines = ShelfLyrics.lines(raw)
+      return ShelfLyrics.index(at: time, in: lines).map { lines[$0] }
+    }
+    for (time, expected): (Double, String?) in [
+      (1, "First line"), (2, "First line"), (3.9, "First line"),
+      (4, "Second line"), (7, "Second line"), (2.5, "First line"), (0.5, nil),
+    ] {
+      precondition(caption(song, at: time)?.text == expected, "Shelf caption at \(time)")
+    }
+    precondition(caption(song, at: 5)?.activePart(at: 5) == 1)
+    precondition(caption(song, at: 7)?.activePart(at: 7) == nil)
+    precondition(caption(nil, at: 7) == nil)
+    let nextSong = "[00:02]Different song"
+    precondition(caption(nextSong, at: 0) == nil)
+    precondition(caption(nextSong, at: 2)?.text == "Different song")
   }
 }
 #endif

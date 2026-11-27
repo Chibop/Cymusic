@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct SearchScreen: View {
+    @State private var useLanyue = false
+    @State private var site = LanyueCatalog.kugou
     @State private var query = ""
     @State private var songs: [Song]?
     @State private var error: String?
@@ -12,7 +14,18 @@ struct SearchScreen: View {
 
     var body: some View {
         List {
-            Section("Apple Music 歌曲目录") {
+            Section("歌曲目录") {
+                Picker("搜索目录", selection: $useLanyue) {
+                    Text("Apple Music").tag(false)
+                    Text("揽乐 Lanyue").tag(true)
+                }.pickerStyle(.segmented).onChange(of: useLanyue) { _ in resetSearch() }
+                if useLanyue {
+                    Picker("来源站点", selection: $site) {
+                        ForEach(LanyueCatalog.allCases, id: \.self) { site in
+                            Text(ScopedSearchPlatform.name(site.rawValue)).tag(site)
+                        }
+                    }.onChange(of: site) { _ in resetSearch() }
+                }
                 HStack {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                     TextField("歌曲名或歌手", text: Binding(get: { query }, set: { query = $0; resetSearch() }))
@@ -55,7 +68,7 @@ struct SearchScreen: View {
         searchTask = Task { @MainActor in
             defer { if !Task.isCancelled { searchTask = nil } }
             do {
-                let found = try await PoolCatalog.searchSongs(input)
+                let found = try await useLanyue ? site.search(input) : PoolCatalog.searchSongs(input)
                 try Task.checkCancellation()
                 songs = found
             } catch { if !Task.isCancelled { self.error = "搜索失败：\(L10n.message(for: error))" } }
@@ -68,6 +81,11 @@ private struct SearchSongLabel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(song.title).font(.headline)
+            if song.metadataProvider == LanyueCatalog.providerID, let platform = song.platform {
+                Text("揽乐 · \(ScopedSearchPlatform.name(platform))").font(.caption).foregroundStyle(.secondary)
+            } else if song.platform == "apple" {
+                Text("Apple Music").font(.caption).foregroundStyle(.secondary)
+            }
             Text([song.artist, song.album ?? ""].filter { !$0.isEmpty }.joined(separator: " · "))
                 .font(.subheadline).foregroundStyle(.secondary)
         }
@@ -103,7 +121,9 @@ private struct SearchSongLabel: View {
         task = Task {
             defer { if !Task.isCancelled { busy = false } }
             do {
-                let targets = try await engine.declaredDownloadPlatforms(for: script)
+                let targets = try await engine.declaredDownloadPlatforms(for: script).filter {
+                    seed.metadataProvider != LanyueCatalog.providerID || seed.platform == $0
+                }
                 try Task.checkCancellation(); sites = targets
                 guard !targets.isEmpty else { return }
                 await withTaskGroup(of: (String, Song?, [String], String?).self) { group in
@@ -140,7 +160,7 @@ private struct SearchSongDestination: View {
     var body: some View {
         List {
             Section("目录歌曲") { SearchSongLabel(song: seed) }
-            Section("按脚本查询全部站点") {
+            Section(seed.metadataProvider == LanyueCatalog.providerID ? "选择本站播放脚本" : "按脚本查询全部站点") {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack {
                         ForEach(engine.scripts) { item in
@@ -156,7 +176,7 @@ private struct SearchSongDestination: View {
                 if route.busy { ProgressView("正在查询所有可用站点…") }
                 if let failure = route.failures["_"] { Text(failure).foregroundStyle(.secondary) }
                 if !route.busy, route.sites.isEmpty, script != nil {
-                    Text("脚本未声明可用下载站点。") .foregroundStyle(.secondary)
+                    Text(seed.metadataProvider == LanyueCatalog.providerID ? "此脚本不支持该来源站点。" : "脚本未声明可用下载站点。") .foregroundStyle(.secondary)
                 }
             }
             ForEach(route.sites, id: \.self) { site in

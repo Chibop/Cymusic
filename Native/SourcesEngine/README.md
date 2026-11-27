@@ -1,5 +1,13 @@
 # Native sources
 
+## Built-in Lanyue catalog
+
+In Search, choose **揽乐 Lanyue**, select Kugou, Migu or Kuwo, and enter a keyword. Search works with an empty script library. Selecting a result preserves its site and recording ID. Playback and download require a script declaring `musicUrl` for that site and the selected quality. Apple Music remains the default catalog and uses recording matching when switching to a resolver's site.
+
+The Swift requests port the three public keyword search adapters from Lanyue commit `5d0a63a4702f0cd63aafe996dd796d011fd34fe6`. Each search returns the first page from the selected site. Kugou includes the base hash and available HQ/SQ hashes. Migu supplies separate song, content and copyright IDs and usually omits duration. Kuwo supplies both the numeric track ID and its `MUSIC_` identifier. These are the three sites supported by the built-in provider. Search availability depends on the upstream catalogs. Audio availability and delivered quality depend on the selected external script. [Pinned upstream adapters](https://github.com/marlang516/Lanyue/tree/5d0a63a4702f0cd63aafe996dd796d011fd34fe6/src/api/platforms) · [MIT license](Lanyue-LICENSE.txt)
+
+Run `python3 Native/LegacyTests/verify-lanyue.py --live` from the repository root to exercise deterministic responses followed by live catalog requests. Both runs import two resolver-only LX scripts and compare their loopback requests with the selected site, tier and native identifiers.
+
 Build the four Swift files and `Runtime/CyMusicUserApiRuntime.m` in the app target with ARC. With `Native` as the project root set `SWIFT_OBJC_BRIDGING_HEADER` to `SourcesEngine/Runtime/CyMusicUserApiRuntime.h` or import that header from the app's existing bridge. Link JavaScriptCore and Security. CommonCrypto is supplied by the SDK. Copy `Runtime/user-api-preload.js` to the bundle root using Copy Bundle Resources. Exclude `verify-engine.sh` and this document from the app bundle.
 
 Provide `SourceEngine`, `Playback` and `Library` environment objects and embed the screens in the host's NavigationStack. `SearchScreen(onSavePlaylist:)` accepts an optional `(String, [Song]) -> Void` callback. `SourceEngine.importScript(_:name:)` validates, persists and selects a script. Failed imports preserve the previous selection. Returned playback URLs remain transient.

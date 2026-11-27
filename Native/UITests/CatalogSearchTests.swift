@@ -21,6 +21,22 @@ final class CatalogSearchTests: XCTestCase {
         XCTAssertTrue(submit.isEnabled)
     }
 
+    func testLanyueSearchAndReturnToAppleCatalog() {
+        let app = openSearch()
+        app.buttons["揽乐 Lanyue"].tap()
+        let query = app.textFields["search.query"]
+        query.tap(); query.typeText("Adele\n")
+        let hit = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'search.result.'")).firstMatch
+        XCTAssertTrue(hit.waitForExistence(timeout: 25))
+        XCTAssertTrue(hit.label.contains("酷狗音乐"))
+        hit.tap()
+        XCTAssertTrue(app.navigationBars["选择音源"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.segmentedControls.buttons["Apple Music"].tap()
+        XCTAssertFalse(hit.exists)
+        XCTAssertEqual(query.value as? String, "Adele")
+    }
+
     // The simulator fixture installs two scripts named Destination QA A and B.
     func testScriptTabsQueryEverySiteAndExposeTierActions() throws {
         let app = openSearch()

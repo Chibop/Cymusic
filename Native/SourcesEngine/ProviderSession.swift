@@ -181,7 +181,20 @@ actor ProviderSession {
                      "artist": song.artist, "singer": song.artist, "source": source]
         if source == "kg" { music["hash"] = song.id }
         if let ids = song.nativeIDs { music.merge(ids) { _, native in native } }
-        let info: SourceJSON = ["musicInfo": music, "type": quality,
+        var payload: SourceJSON = music
+        if source == "kg", let ids = song.nativeIDs {
+            var types = [SourceJSON]()
+            var byTier = [String: SourceJSON]()
+            for (tier, field) in [("128k", "hash"), ("320k", "320hash"), ("flac", "sqhash")] {
+                if let hash = ids[field] {
+                    types.append(["type": tier, "hash": hash, "size": NSNull()])
+                    byTier[tier] = ["hash": hash, "size": NSNull()]
+                }
+            }
+            payload["types"] = types
+            payload["_types"] = byTier
+        }
+        let info: SourceJSON = ["musicInfo": payload, "type": quality,
                                 "requestContext": ["requestKey": key, "requestType": "current"]]
         let response = try await wait(key, seconds: 5) {
             send("request", ["requestKey": key, "data": ["action": "musicUrl", "source": source, "info": info]])

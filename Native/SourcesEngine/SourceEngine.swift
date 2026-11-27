@@ -231,6 +231,9 @@ struct SourceScript: Codable, Identifiable {
         let pin = song.searchScriptID
         let requestedQuality = song.requestedQuality
         let native = ProviderSession.platform(song)
+        if song.metadataProvider == LanyueCatalog.providerID && (pin == nil || requestedQuality == nil) {
+            throw SourceFailure("请选择播放音源和音质")
+        }
         if requestedQuality != nil && (pin?.isEmpty != false || native.isEmpty) { throw SourceFailure("指定音质需要选择音源和平台") }
         func permits(_ id: String, _ platform: String) -> Bool {
             (pin == nil || (pin == id && native == platform)) && (routes == nil || routes?[id]?.contains(platform) == true)

@@ -61,7 +61,7 @@ struct LibraryScreen: View {
   }
   @State private var albums: [ShelfAlbum] = []
   @State private var selected = 0
-  private enum Page: Equatable { case albums, tracks(ShelfCollection), playing }
+  private enum Page: Hashable { case albums, tracks(ShelfCollection), playing }
   @State private var pages: [Page] = [.albums]
   private var page: Page { pages.last ?? .albums }
   private var collection: ShelfCollection {
@@ -78,28 +78,40 @@ struct LibraryScreen: View {
   @State private var detail: ShelfAlbum?
   @State private var drawerOpen = false
   @State private var librarySheet = false
-  @State private var showingPlaylists = false
-  @State private var namingPlaylist = false
-  @State private var playlistName = ""
+  @State private var menuFocus = Page.albums
+  @State private var songs: [Song] = []
+  @State private var songIndex = 0
+  private var menuPages: [Page] {
+    [.tracks(.favorites), .albums, .tracks(.all)] + library.playlists.map { .tracks(.playlist($0.id)) } + [.playing]
+  }
+  private var browsingSongs: Bool { if case .tracks = page { return true }; return false }
   private var hasQueue: Bool { !playback.queue.isEmpty && playback.current != nil }
   private var inQueue: Bool {
     page == .playing && hasQueue
   }
   private var album: ShelfAlbum? { albums.indices.contains(selected) ? albums[selected] : nil }
-  private var count: Int { inQueue ? playback.queue.count : albums.count }
-  private var focus: Int { inQueue ? playback.index : selected }
+  private var count: Int { browsingSongs ? songs.count : (page == .playing ? playback.queue.count : albums.count) }
+  private var focus: Int { browsingSongs ? songIndex : (inQueue ? playback.index : selected) }
+  private var focusedSong: Song? { browsingSongs && songs.indices.contains(songIndex) ? songs[songIndex] : (inQueue ? playback.current : nil) }
+  private var focusedTitle: String { focusedSong?.title ?? (page == .albums ? album?.title : nil) ?? "" }
+  private var focusedArt: URL? { focusedSong?.artwork ?? (page == .albums ? album?.art : nil) }
   private func step(_ n: Int) {
-    guard !drawerOpen else { return }
-    if case .tracks = page, !immersive { return }
+    if drawerOpen {
+      let rows = menuPages.filter { $0 != .playing || hasQueue }
+      guard let index = rows.firstIndex(of: menuFocus) else { return }
+      let next = rows[min(rows.count - 1, max(0, index + n))]
+      if next != menuFocus { menuFocus = next; UISelectionFeedbackGenerator().selectionChanged() }
+      return
+    }
     guard count > 0 else { return }
     let next = min(count - 1, max(0, focus + n))
     guard next != focus else { return }
     UISelectionFeedbackGenerator().selectionChanged()
-    if inQueue { playback.select(next) } else { selected = next }
+    if browsingSongs { songIndex = next } else if inQueue { playback.select(next) } else { selected = next }
   }
   private func center() {
-    guard !drawerOpen else { return }
-    if case .tracks = page { return }
+    if drawerOpen { navigate(menuFocus); return }
+    if browsingSongs { playPause(); return }
     if inQueue {
       playback.toggle()
     } else if let album {
@@ -107,7 +119,7 @@ struct LibraryScreen: View {
     }
   }
   private func setDrawer(_ open: Bool) {
-    if open { showingPlaylists = false }
+    if open { menuFocus = page }
     withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.30)) { drawerOpen = open }
   }
   private func menu() { setDrawer(!drawerOpen) }
@@ -115,8 +127,10 @@ struct LibraryScreen: View {
     if page != destination { pages.append(destination) }
     setDrawer(false)
   }
-  private func openTracks(_ scope: ShelfCollection) {
-    navigate(.tracks(scope))
+  private func refreshSongs(preserveFocus: Bool) {
+    let previous = preserveFocus ? focusedSong?.id : nil
+    if case .tracks(let scope) = page { songs = scope.tracks(in: library) } else { songs = [] }
+    songIndex = previous.flatMap { id in songs.firstIndex { $0.id == id } } ?? 0
   }
   private func shuffle() {
     let songs = collection.tracks(in: library).shuffled()
@@ -126,8 +140,10 @@ struct LibraryScreen: View {
   }
   private func playPause() {
     if drawerOpen { return }
-    if case .tracks = page, !immersive {
-      if hasQueue { playback.toggle() }
+    if browsingSongs {
+      guard songs.indices.contains(songIndex) else { return }
+      playback.play(songs, index: songIndex)
+      navigate(.playing)
       return
     }
     if inQueue {
@@ -149,7 +165,9 @@ struct LibraryScreen: View {
           VStack(spacing: 0) {
             display(width: width, height: height).padding(.top, 4)
             Spacer(minLength: 8)
-            ClickWheel(size: dial, songMode: inQueue, menu: menu, center: center, step: step, play: playPause)
+            ClickWheel(size: dial, centerLabel: drawerOpen ? "确认选择" : browsingSongs ? "播放歌曲" : inQueue ? "播放或暂停" : "打开专辑",
+                       centerID: drawerOpen ? "library.confirm" : browsingSongs ? "library.playSong" : inQueue ? "library.center" : "library.openAlbum",
+                       menu: menu, center: center, step: step, play: playPause)
           }
           .padding(.bottom, max(8, (g.size.height - height - dial) * 0.30))
           .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -175,17 +193,19 @@ struct LibraryScreen: View {
           .accessibilityLabel("资料库菜单").accessibilityIdentifier("library.toolbarMenu")
       }
       ToolbarItem(placement: .navigationBarTrailing) {
-        Button(action: shuffle) { Label("随机播放", systemImage: "shuffle") }.disabled(collection.tracks(in: library).isEmpty)
+        Button(action: shuffle) { Label("随机播放", systemImage: "shuffle") }.disabled(browsingSongs ? songs.isEmpty : collection.tracks(in: library).isEmpty)
           .accessibilityIdentifier("library.shuffle")
       }
     }
-    .onChange(of: library.shelfRevision) { _ in refreshShelf() }
+    .onChange(of: page) { _ in refreshSongs(preserveFocus: false) }
+    .onChange(of: library.shelfRevision) { _ in refreshShelf(); refreshSongs(preserveFocus: true) }
     .onChange(of: library.playlists.map(\.id)) { ids in
       pages.removeAll { page in
         if case .tracks(.playlist(let id)) = page { return !ids.contains(id) }
         return false
       }
       if case .playlist(let id) = sheetSelection, !ids.contains(id) { sheetSelection = .all }
+      if !menuPages.contains(menuFocus) { menuFocus = page }
     }
     .onAppear { refreshShelf() }
     .task { await library.indexLocalFiles() }
@@ -208,11 +228,7 @@ struct LibraryScreen: View {
         }
       }.presentationDragIndicator(.visible)
     }
-    .alert("新建歌单", isPresented: $namingPlaylist) {
-      TextField("歌单名称", text: $playlistName)
-      Button("创建") { library.createPlaylist(playlistName) }
-      Button("取消", role: .cancel) {}
-    }
+
 
     .alert(
       "Library",
@@ -236,42 +252,17 @@ struct LibraryScreen: View {
   private var drawerPanel: some View {
     VStack(alignment: .leading, spacing: 0) {
       HStack {
-        Text(showingPlaylists ? "歌单列表" : "资料库").font(.headline)
+        Text("资料库").font(.headline)
         Spacer()
         Button { setDrawer(false) } label: { Image(systemName: "xmark.circle.fill").font(.title2) }
           .accessibilityLabel("关闭菜单")
       }.padding(.bottom, 12)
-      if showingPlaylists {
-        Button { showingPlaylists = false } label: { Label("返回", systemImage: "chevron.left") }
-          .padding(.bottom, 8)
-        List {
-            ForEach(library.playlists) { item in
-              Button {
-                openTracks(.playlist(item.id))
-              } label: {
-                HStack { Label(item.name, systemImage: "music.note.list"); Spacer(); if collection == .playlist(item.id) { Image(systemName: "checkmark") } }
-                  .padding(.vertical, 12).contentShape(Rectangle())
-              }.buttonStyle(.plain).swipeActions {
-                Button("删除", role: .destructive) {
-                  library.deletePlaylist(item.id)
-                }
-              }
-              .listRowBackground(Color.clear)
-            }
-            Button { playlistName = ""; namingPlaylist = true } label: {
-              Label("新建歌单", systemImage: "plus").padding(.vertical, 12)
-            }.frame(maxWidth: .infinity, alignment: .leading)
-        }.listStyle(.plain).scrollContentBackground(.hidden)
-      } else {
+      ScrollViewReader { proxy in
         ScrollView {
           VStack(spacing: 0) {
-            menuRow("我喜欢的", icon: "heart") { openTracks(.favorites) }
-            menuRow("专辑列表", icon: "square.stack") { navigate(.albums) }
-            menuRow("全部歌曲", icon: "music.note.list") { openTracks(.all) }
-            menuRow("歌单列表", icon: "text.badge.list.bullet") { showingPlaylists = true }
-            menuRow("正在播放", icon: "play.circle") { navigate(.playing) }.disabled(!hasQueue)
+            ForEach(menuPages, id: \.self) { row in menuRow(row).id(row) }
           }
-        }
+        }.onAppear { proxy.scrollTo(menuFocus) }.onChange(of: menuFocus) { proxy.scrollTo($0) }
       }
     }
     .padding(12).frame(maxWidth: 252, alignment: .leading)
@@ -283,11 +274,21 @@ struct LibraryScreen: View {
 
   }
 
-  private func menuRow(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
-    Button(action: action) {
-      HStack { Label(title, systemImage: icon); Spacer(); if (title == "全部歌曲" && collection == .all) || (title == "我喜欢的" && collection == .favorites) { Image(systemName: "checkmark") } }
-        .padding(.vertical, 13).contentShape(Rectangle())
-    }.buttonStyle(.plain).overlay(alignment: .bottom) { Divider() }
+  private func menuRow(_ row: Page) -> some View {
+    let label: (String, String)
+    switch row {
+    case .albums: label = ("专辑列表", "square.stack")
+    case .playing: label = ("正在播放", "play.circle")
+    case .tracks(.favorites): label = ("我喜欢的", "heart")
+    case .tracks(.all): label = ("全部歌曲", "music.note.list")
+    case .tracks(let scope): label = (scope.title(in: library), "music.note.list")
+    }
+    return Button { navigate(row) } label: {
+      HStack { Label(label.0, systemImage: label.1); Spacer() }
+        .padding(12).contentShape(Rectangle())
+        .background(menuFocus == row ? Color.accentColor.opacity(0.25) : .clear, in: RoundedRectangle(cornerRadius: 8))
+    }.buttonStyle(.plain).accessibilityAddTraits(menuFocus == row ? .isSelected : [])
+      .disabled(row == .playing && !hasQueue)
   }
 
   private func refreshShelf() {
@@ -315,17 +316,17 @@ struct LibraryScreen: View {
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .foregroundStyle(.white)
-    .background(CoverFlowBackdrop(art: inQueue ? playback.current?.artwork : album?.art,
-                                  title: inQueue ? playback.current?.title ?? "" : album?.title ?? ""))
+    .background(CoverFlowBackdrop(art: focusedArt, title: focusedTitle))
   }
 
   private func shelf(activate: @escaping () -> Void) -> some View {
-    CoverFlowShelf(count: count, focus: focus, reduceMotion: reduceMotion, step: step, activate: activate) { i in
-      SleeveItem(art: inQueue ? playback.queue[i].artwork : albums[i].art,
-             title: inQueue ? playback.queue[i].title : albums[i].title)
+    let tracks = browsingSongs ? songs : playback.queue
+    let songShelf = page != .albums
+    return CoverFlowShelf(count: count, focus: focus, reduceMotion: reduceMotion, step: step, activate: activate) { [albums] i in
+      songShelf ? SleeveItem(art: tracks[i].artwork, title: tracks[i].title) : SleeveItem(art: albums[i].art, title: albums[i].title)
     }
       .accessibilityElement(children: .ignore).accessibilityLabel("Cover Flow")
-      .accessibilityValue(inQueue ? playback.current?.title ?? "" : album?.title ?? "")
+      .accessibilityValue(focusedTitle)
       .accessibilityAdjustableAction { step($0 == .increment ? 1 : -1) }.accessibilityAction {
         activate()
       }.accessibilityIdentifier("library.coverflow")
@@ -334,13 +335,13 @@ struct LibraryScreen: View {
   private var caption: some View {
     ShelfCaption(raw: inQueue ? playback.current?.lyrics : nil, elapsed: playback.elapsed) {
       VStack(spacing: 2) {
-        Text(verbatim: inQueue ? playback.current?.title ?? "" : album?.title ?? "").font(
+        Text(verbatim: focusedTitle).font(
           .headline
-        ).accessibilityIdentifier(inQueue ? "library.currentTitle" : "library.albumTitle")
-        Text(verbatim: inQueue ? playback.current?.artist ?? "" : album?.artist ?? "").font(
+        ).accessibilityIdentifier(inQueue ? "library.currentTitle" : browsingSongs ? "library.songTitle" : "library.albumTitle")
+        Text(verbatim: focusedSong?.artist ?? album?.artist ?? "").font(
           .subheadline
         ).foregroundStyle(Color(white: 0.76))
-        if inQueue, let badge = playback.current?.quality {
+        if let badge = focusedSong?.quality {
           Text(verbatim: L10n.quality(badge)).font(.caption2.monospaced()).foregroundStyle(Color(white: 0.76))
         }
       }.lineLimit(1).padding(.horizontal, 8).padding(.bottom, 12).foregroundStyle(.white)
@@ -348,8 +349,7 @@ struct LibraryScreen: View {
   }
 
   private func display(width: CGFloat, height: CGFloat) -> some View {
-    let art = inQueue ? playback.current?.artwork : album?.art
-    let title = inQueue ? playback.current?.title : album?.title
+
     return VStack(spacing: 0) {
       HStack {
         if pages.count > 1 {
@@ -362,33 +362,28 @@ struct LibraryScreen: View {
           Text(scope.title(in: library)).bold().accessibilityIdentifier("library.trackScope")
           Spacer()
         } else {
-          Text(inQueue ? String(localized: "Now Playing") : collection.title(in: library)).fontWeight(
+          Text(inQueue ? String(localized: "Now Playing") : "专辑列表").fontWeight(
             .bold)
           Spacer()
           if inQueue { Image(systemName: playback.isPlaying ? "play.fill" : "pause.fill") }
-          Text(count == 0 ? "—" : "\(focus + 1) / \(count)").monospacedDigit()
         }
+        Text(count == 0 ? "—" : "\(focus + 1) / \(count)").monospacedDigit()
       }
       .font(.caption).foregroundStyle(.primary).padding(.horizontal, 12).frame(height: pages.count > 1 ? 36 : 27)
       .background(.regularMaterial)
       .overlay(alignment: .bottom) { Divider() }
-      if case .tracks(let scope) = page {
-        CollectionTracksView(selection: scope) { tracks, index in
-          playback.play(tracks, index: index)
-          navigate(.playing)
-        }.foregroundStyle(.primary)
-      } else if count > 0 {
+      if count > 0 {
         shelf(activate: center)
         caption.frame(minHeight: min(108, height * 0.26)).layoutPriority(1)
       } else {
         Spacer()
         Image(systemName: "music.note.list").font(.largeTitle)
-        Text("No songs yet").font(.headline).padding(.top, 5)
+        Text(browsingSongs ? "暂无歌曲" : "No songs yet").font(.headline).padding(.top, 5)
         Text("可在设置中导入歌曲").font(.subheadline).padding(8)
         Spacer()
       }
     }.foregroundStyle(.white).frame(width: max(1, width - 12), height: max(1, height - 12)).background(
-      CoverFlowBackdrop(art: art, title: title ?? "")
+      CoverFlowBackdrop(art: focusedArt, title: focusedTitle)
     ).accessibilityHidden(drawerOpen).overlay(alignment: .leading) { collectionOverlay }
       .clipShape(RoundedRectangle(cornerRadius: 5)).padding(6)
       .background(RoundedRectangle(cornerRadius: 10).fill(Color(white: 0.14))).overlay(
@@ -402,7 +397,7 @@ private struct ShelfCaption<Metadata: View>: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
   var body: some View {
     let lines = ShelfLyrics.lines(raw)
-    if let index = ShelfLyrics.index(at: elapsed, in: lines), !lines[index].text.isEmpty {
+    if let index = ShelfLyrics.index(at: elapsed, in: lines) {
       let line = lines[index]
       ZStack {
         VStack(spacing: 2) {
@@ -458,7 +453,8 @@ enum ShelfLyrics {
   @MainActor static func lines(_ raw: String?) -> [Line] {
     guard let raw else { return [] }
     if let cache, cache.0 == raw { return cache.1 }
-    let parsed = parse(raw)
+    // A blank cue leaves the shelf caption in place. Keep all cues in the shared full-player parser.
+    let parsed = parse(raw).filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     cache = (raw, parsed)
     return parsed
   }
@@ -556,7 +552,7 @@ private struct Jacket: View {
 }
 
 private struct ClickWheel: View {
-  let size: CGFloat, songMode: Bool
+  let size: CGFloat, centerLabel: LocalizedStringKey, centerID: String
   let menu: () -> Void, center: () -> Void, step: (Int) -> Void, play: () -> Void
   @State private var angle: Double?
   @State private var accumulated = 0.0
@@ -585,8 +581,7 @@ private struct ClickWheel: View {
         )
         .overlay(Circle().stroke(Color.black.opacity(0.16))).frame(
           width: max(44, size * 0.39), height: max(44, size * 0.39))
-      }.buttonStyle(.plain).accessibilityLabel(songMode ? "播放或暂停" : "打开专辑").accessibilityIdentifier(
-        songMode ? "library.center" : "library.openAlbum")
+      }.buttonStyle(.plain).accessibilityLabel(centerLabel).accessibilityIdentifier(centerID)
     }.frame(width: size, height: size).contentShape(Circle()).simultaneousGesture(
       DragGesture(minimumDistance: 9, coordinateSpace: .local).onChanged { value in
         lastWheelDrag = ProcessInfo.processInfo.systemUptime
@@ -830,7 +825,15 @@ private struct CollectionsView: View {
       row(.all, icon: "music.note.list")
       Section("Playlists") {
         ForEach(library.playlists) { item in
-          row(.playlist(item.id), icon: "music.note.list").swipeActions {
+          NavigationLink {
+            SheetPlaylistDetail(playlistID: item.id, play: play)
+          } label: {
+            HStack {
+              PlaylistCover(tracks: library.localTracks(item.songIDs))
+                .frame(width: 44, height: 44).accessibilityHidden(true)
+              Text(verbatim: item.name)
+            }
+          }.swipeActions {
             Button("Delete", role: .destructive) {
               if selection == .playlist(item.id) { selection = .all }
               library.deletePlaylist(item.id)
@@ -846,7 +849,7 @@ private struct CollectionsView: View {
       }
       Section(selection.title(in: library)) {
         LibraryTracks(
-          queue: selection.tracks(in: library), playlist: playlistID, play: play,
+          queue: selection.tracks(in: library), playlist: playlistID, play: play, sheetStyle: true,
           removing: $removing)
       }
     }.navigationTitle("Library").toolbar {
@@ -872,6 +875,34 @@ private struct CollectionsView: View {
         if selection == item { Image(systemName: "checkmark").accessibilityHidden(true) }
       }
     }.accessibilityAddTraits(selection == item ? .isSelected : [])
+  }
+}
+
+private struct SheetPlaylistDetail: View {
+  @EnvironmentObject var library: Library
+  let playlistID: UUID
+  let play: ([Song], Int) -> Void
+  @State private var adding = false
+  @State private var removing: Song?
+
+  var body: some View {
+    let selection = ShelfCollection.playlist(playlistID)
+    let tracks = selection.tracks(in: library)
+    List {
+      VStack(spacing: 12) {
+        PlaylistCover(tracks: tracks).frame(width: 168, height: 168)
+        Text(verbatim: selection.title(in: library)).font(.title2.bold())
+        Text("\(tracks.count) 首歌曲").font(.subheadline).foregroundStyle(.secondary)
+      }.frame(maxWidth: .infinity).padding(.vertical).listRowSeparator(.hidden)
+      LibraryTracks(queue: tracks, playlist: playlistID, play: play, sheetStyle: true, removing: $removing)
+    }.listStyle(.plain).navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .navigationBarLeading) {
+          Button { adding = true } label: { Label("添加歌曲", systemImage: "plus") }
+            .accessibilityIdentifier("playlist.addSongs")
+        }
+      }.sheet(isPresented: $adding) { PlaylistSongPicker(playlistID: playlistID) }
+      .modifier(CacheRemoval(song: $removing))
   }
 }
 
@@ -903,6 +934,7 @@ private struct LibraryTracks: View {
   let queue: [Song]
   let playlist: UUID?
   let play: ([Song], Int) -> Void
+  var sheetStyle = false
   @Binding var removing: Song?
 
   var body: some View {
@@ -912,14 +944,23 @@ private struct LibraryTracks: View {
         Button {
           play(queue, index)
         } label: {
-          VStack(alignment: .leading) {
-            Text(song.title).lineLimit(1)
-            Text(song.artist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            if let quality = song.quality {
-              Label(L10n.quality(quality), systemImage: "waveform").font(.caption2).foregroundStyle(.secondary)
+          HStack {
+            if sheetStyle {
+              Jacket(art: song.artwork, title: song.title).frame(width: 46, height: 46)
+                .clipShape(RoundedRectangle(cornerRadius: 5)).accessibilityHidden(true)
+            }
+            VStack(alignment: .leading) {
+              Text(song.title).lineLimit(1)
+              Text(song.artist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+              if let quality = song.quality {
+                Group {
+                  if sheetStyle { Text(verbatim: L10n.quality(quality)) }
+                  else { Label(L10n.quality(quality), systemImage: "waveform") }
+                }.font(.caption2).foregroundStyle(.secondary)
+              }
             }
           }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-        }.buttonStyle(.plain)
+        }.buttonStyle(.plain).accessibilityIdentifier("library.track." + song.id)
         Menu {
           Button(library.isFavorite(song) ? "取消收藏" : "添加到收藏") {
             library.favorite(song)

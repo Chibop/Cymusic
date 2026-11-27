@@ -546,13 +546,20 @@ final class Library: ObservableObject {
   }
 
   func add(_ song: Song, to id: UUID) {
+    add([song], to: id)
+  }
+
+  @discardableResult
+  func add(_ songs: [Song], to id: UUID) -> Bool {
     var next = store
-    guard let i = next.playlists.firstIndex(where: { $0.id == id }),
-      !next.playlists[i].songIDs.contains(song.id)
-    else { return }
-    remember(song, in: &next)
-    next.playlists[i].songIDs.append(song.id)
-    save(next)
+    guard let i = next.playlists.firstIndex(where: { $0.id == id }) else { return false }
+    var members = Set(next.playlists[i].songIDs)
+    let additions = songs.filter { members.insert($0.id).inserted }
+    guard !additions.isEmpty else { return true }
+    var known = Set(next.songs.map(\.id))
+    next.songs.append(contentsOf: additions.filter { known.insert($0.id).inserted })
+    next.playlists[i].songIDs.append(contentsOf: additions.map(\.id))
+    return save(next)
   }
 
   func remove(_ song: Song, from id: UUID) {

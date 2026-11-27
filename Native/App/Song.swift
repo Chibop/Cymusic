@@ -9,6 +9,7 @@ struct Song: Codable, Identifiable, Hashable {
     var platform: String? = nil
     // Provider-native identifiers can differ by site and are not interchangeable.
     var nativeIDs: [String: String]? = nil
+    var metadataProvider: String? = nil
     var lyrics: String? = nil
     var album: String? = nil
     var albumArtist: String? = nil

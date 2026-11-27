@@ -11,15 +11,16 @@ actor CoverFlowArtwork {
       self.color = color
     }
   }
-  private let cache: NSCache<NSURL, Sample> = {
-    let cache = NSCache<NSURL, Sample>()
+  private let cache: NSCache<NSString, Sample> = {
+    let cache = NSCache<NSString, Sample>()
     cache.totalCostLimit = 36 * 1024 * 1024
     return cache
   }()
   private var pending: [URL: Task<Sample?, Never>] = [:]
 
   func sample(_ url: URL) async -> Sample? {
-    if let hit = cache.object(forKey: url as NSURL) { return hit }
+    let key = "jacket-v2|\(url.absoluteString)" as NSString
+    if let hit = cache.object(forKey: key) { return hit }
     if let job = pending[url] { return await job.value }
     let job = Task.detached(priority: .utility) { () -> Sample? in
       let source: CGImageSource?
@@ -39,9 +40,56 @@ actor CoverFlowArtwork {
     let result = await job.value
     pending[url] = nil
     if let result, let image = result.image.cgImage {
-      cache.setObject(result, forKey: url as NSURL, cost: image.bytesPerRow * image.height)
+      cache.setObject(result, forKey: key, cost: image.bytesPerRow * image.height)
     }
     return result
+  }
+
+  // Square exports sometimes pad a rectangular jacket. Rectangular sources already
+  // retain their aspect ratio and use the ordinary centered square below.
+  private static func paddingInset(_ image: CGImage) -> Int {
+    let n = image.width
+    guard n == image.height, n >= 96,
+          let ctx = CGContext(data: nil, width: n, height: n, bitsPerComponent: 8,
+            bytesPerRow: n * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue),
+          let data = ctx.data else { return 0 }
+    ctx.draw(image, in: CGRect(x: 0, y: 0, width: n, height: n))
+    let rgba = data.assumingMemoryBound(to: UInt8.self)
+    guard max(rgba[0], rgba[1], rgba[2]) <= 8, rgba[3] == 255 else { return 0 }
+
+    func band(vertical: Bool, far: Bool) -> Int? {
+      var solid = 0
+      // Require a flat core, permitting a few JPEG ringing lines at its seam.
+      for depth in 0...n / 8 {
+        let line = far ? n - 1 - depth : depth
+        var deviation = 0, bright = 0
+        for p in 0..<n {
+          let i = (vertical ? p * n + line : line * n + p) * 4
+          guard rgba[i + 3] == 255 else { return nil }
+          for channel in 0..<3 {
+            deviation = max(deviation, abs(Int(rgba[i + channel]) - Int(rgba[channel])))
+          }
+          if max(rgba[i], rgba[i + 1], rgba[i + 2]) > 32 { bright += 1 }
+        }
+        if deviation <= (depth < max(3, n / 100) ? 1 : 5) && solid == depth { solid += 1; continue }
+        if bright * 2 >= n {
+          return solid >= max(3, n / 100) && solid * 2 >= depth && depth - solid <= 8 ? depth : nil
+        }
+        if deviation > 20 || depth - solid >= 8 { return nil }
+      }
+      return nil
+    }
+    func pair(vertical: Bool) -> Int? {
+      guard let a = band(vertical: vertical, far: false),
+            let b = band(vertical: vertical, far: true), abs(a - b) <= 1 else { return nil }
+      return max(a, b)
+    }
+    // Four matching edges can be a deliberate picture frame.
+    switch (pair(vertical: true), pair(vertical: false)) {
+    case (let inset?, nil), (nil, let inset?): return inset
+    default: return 0
+    }
   }
 
   private static func decode(_ source: CGImageSource) -> Sample? {
@@ -52,7 +100,7 @@ actor CoverFlowArtwork {
     // pixels without rescaling: the face, its reflection, the SwiftUI jacket and the
     // tint sampler should all see exactly the same centered square.
     guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
-    let side = min(thumbnail.width, thumbnail.height)
+    let side = min(thumbnail.width, thumbnail.height) - 2 * paddingInset(thumbnail)
     let crop = CGRect(x: (thumbnail.width - side) / 2, y: (thumbnail.height - side) / 2,
                       width: side, height: side)
     guard let image = thumbnail.cropping(to: crop) else { return nil }

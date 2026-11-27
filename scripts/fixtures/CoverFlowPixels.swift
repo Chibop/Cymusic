@@ -7,7 +7,60 @@ import UIKit
   static let format: UIGraphicsImageRendererFormat = {
     let f = UIGraphicsImageRendererFormat(); f.scale = 1; f.opaque = false; return f
   }()
+  @MainActor static func checkBands() async throws {
+    for (name, expected) in [("sides", 176), ("horizontal", 176), ("frame", 200),
+        ("one-sided", 200), ("asymmetric", 200), ("all-black", 200), ("transparent", 200),
+        ("textured", 200), ("too-wide", 200), ("too-thin", 200), ("dark-seam", 200)] {
+      let bounds = CGRect(x: 0, y: 0, width: 200, height: 200)
+      let data = UIGraphicsImageRenderer(size: bounds.size, format: format).pngData { c in
+        if name != "transparent" { UIColor.black.setFill(); c.fill(bounds) }
+        let width: CGFloat = name == "too-wide" ? 48 : name == "too-thin" ? 1 : 12
+        var art = bounds.insetBy(dx: width, dy: 0)
+        switch name {
+        case "horizontal": art = bounds.insetBy(dx: 0, dy: width)
+        case "frame": art = art.insetBy(dx: 0, dy: width)
+        case "asymmetric": art.size.width -= 5
+        case "one-sided": art.size.width += width
+        case "all-black": return
+        case "textured":
+          UIColor(white: 0.04, alpha: 1).setFill()
+          for y in stride(from: 0, to: 200, by: 3) { c.fill(CGRect(x: 0, y: y, width: 200, height: 1)) }
+        default: break
+        }
+        (name == "dark-seam" ? UIColor(white: 0.09, alpha: 1) : .orange).setFill(); c.fill(art)
+      }
+      let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".png")
+      defer { try? FileManager.default.removeItem(at: url) }
+      try data.write(to: url)
+      let sample = await CoverFlowArtwork.shared.sample(url)
+      precondition(sample?.image.cgImage?.width == expected, name)
+      let cached = await CoverFlowArtwork.shared.sample(url)
+      precondition(cached === sample)
+      let after = try Data(contentsOf: url); precondition(after == data)
+    }
+    print("PASS synthetic band decisions, cached samples and source preservation")
+  }
+
+  // Optional directory containing the two 600x600bb Apple exports (US and TW).
+  @MainActor static func checkPublicArt(_ directory: URL) async throws {
+    for file in ["apple", "apple-tw"] {
+      let url = directory.appendingPathComponent(file + ".jpg")
+      let stage = SleeveStage(frame: CGRect(x: 0, y: 0, width: 400, height: 700))
+      stage.configure(.init(count: 1, focus: 0, reduceMotion: true, step: { _ in }, activate: {},
+                            item: { _ in .init(art: url, title: "七里香") }))
+      let face = stage.layer.sublayers!.first!.sublayers!.last!
+      for _ in 0..<500 where face.contents == nil { try await Task.sleep(nanoseconds: 10_000_000) }
+      let sample = await CoverFlowArtwork.shared.sample(url)
+      guard let image = sample?.image.cgImage, (face.contents as AnyObject?) === image else { fatalError("face binding") }
+      print("\(file) face \(image.width)x\(image.height)")
+      precondition(image.width == 542 && image.height == 542, "\(file) produced \(image.width)x\(image.height)")
+      let capture = UIGraphicsImageRenderer(size: face.bounds.size, format: format).pngData { c in face.render(in: c.cgContext) }
+      try capture.write(to: directory.appendingPathComponent(file + "-face.png"))
+    }
+  }
   @MainActor static func main() async throws {
+    try await checkBands()
+    if let dir = CommandLine.arguments.dropFirst().first { try await checkPublicArt(URL(fileURLWithPath: dir)) }
     for (w,h) in [(1800,900),(900,1800)] {
       let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".png")
       defer { try? FileManager.default.removeItem(at: url) }

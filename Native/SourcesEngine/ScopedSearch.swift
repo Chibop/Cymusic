@@ -58,6 +58,16 @@ extension SourceEngine {
 
     func matchCatalogSong(_ seed: Song, script: SourceScript, platform: String) async throws -> Song {
         let script = try installed(script)
+        if seed.metadataProvider == LanyueCatalog.providerID {
+            guard seed.platform == platform, LanyueCatalog(rawValue: platform) != nil,
+                  try await declaredDownloadPlatforms(for: script).contains(platform) else {
+                throw SourceFailure("所选音源不支持此歌曲的来源站点")
+            }
+            var match = seed
+            match.searchScriptID = script.id
+            match.requestedQuality = nil
+            return match
+        }
         guard seed.platform == "apple", !platform.isEmpty, platform.lowercased() != "apple" else {
             throw SourceFailure("请选择 Apple Music 歌曲和下载平台")
         }

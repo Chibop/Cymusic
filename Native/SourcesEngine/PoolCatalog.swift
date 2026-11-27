@@ -3,6 +3,43 @@ import Foundation
 import MusicKit
 #endif
 
+// Catalog requests adapted from Lanyue's kugou.js, migu.js and kuwo.js.
+// Copyright (c) 2026 揽乐 Lanyue. See Lanyue-LICENSE.txt for the MIT license.
+enum LanyueCatalog: String, CaseIterable {
+    case kugou = "kg", migu = "mg", kuwo = "kw"
+    static let providerID = "lanyue"
+
+    func search(_ input: String) async throws -> [Song] {
+        let keyword = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !keyword.isEmpty else { return [] }
+        let songs: [Song]
+        switch self {
+        case .kugou:
+            songs = try PoolCatalog.parseKugou(await PoolCatalog.fetch("https://songsearch.kugou.com/song_search_v2", [
+                "keyword": keyword, "page": "1", "pagesize": "30", "platform": "WebFilter"
+            ]))
+        case .migu:
+            songs = try PoolCatalog.parseMigu(await PoolCatalog.fetch("https://pd.musicapp.migu.cn/MIGUM2.0/v1.0/content/search_all.do", [
+                "ua": "Android_migu", "version": "5.0.1", "text": keyword, "pageNo": "1", "pageSize": "20",
+                "searchSwitch": #"{"song":1,"album":0,"singer":0,"tagSong":0,"mvSong":0,"songlist":0,"bestShow":1}"#
+            ], referer: "https://music.migu.cn/"))
+        case .kuwo:
+            songs = try PoolCatalog.parseKuwo(await PoolCatalog.fetch("https://www.kuwo.cn/search/searchMusicBykeyWord", [
+                "all": keyword, "vipver": "1", "client": "kt", "ft": "music", "cluster": "0", "strategy": "2012",
+                "encoding": "utf8", "rformat": "json", "mobi": "1", "issubtitle": "1", "show_copyright_off": "1",
+                "pn": "0", "rn": "30"
+            ]))
+        }
+        var seen = Set<String>()
+        return songs.compactMap { row in
+            guard seen.insert(row.id).inserted else { return nil }
+            var song = row
+            song.metadataProvider = Self.providerID
+            return song
+        }
+    }
+}
+
 enum PoolCatalog {
     enum Kind: String, CaseIterable, Identifiable {
         case songs = "歌曲", albums = "专辑", artists = "艺人"
@@ -39,7 +76,7 @@ enum PoolCatalog {
         var isEmpty: Bool { songs.isEmpty && albums.isEmpty && artists.isEmpty }
     }
 
-    private static func fetch(_ base: String, _ query: [String: String], referer: String? = nil) async throws -> Data {
+    fileprivate static func fetch(_ base: String, _ query: [String: String], referer: String? = nil) async throws -> Data {
         try Task.checkCancellation()
         var parts = URLComponents(string: base)!
         parts.queryItems = query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
@@ -239,6 +276,10 @@ enum PoolCatalog {
         let data = try await fetch("https://c.musicapp.migu.cn/v1.0/content/search_all.do", [
             "text": term, "pageNo": "1", "pageSize": "30", "searchSwitch": "{\"song\":1}"
         ])
+        return try parseMigu(data)
+    }
+
+    fileprivate static func parseMigu(_ data: Data) throws -> [Song] {
         guard let root = try JSONSerialization.jsonObject(with: data) as? SourceJSON,
               root["code"] as? String == "000000", let resultData = root["songResultData"] as? SourceJSON,
               let rows = resultData["result"] as? [SourceJSON] else { throw URLError(.cannotParseResponse) }
@@ -247,7 +288,7 @@ enum PoolCatalog {
                   let copyright = row["copyrightId"] as? String, let title = row["name"] as? String,
                   let artists = row["singers"] as? [SourceJSON] else { return nil }
             let artist = artists.compactMap { $0["name"] as? String }.joined(separator: " / ")
-            guard !artist.isEmpty else { return nil }
+            guard !artist.isEmpty, !id.isEmpty, !content.isEmpty, !copyright.isEmpty, !title.isEmpty else { return nil }
             let album = (row["albums"] as? [SourceJSON])?.compactMap { $0["name"] as? String }.first
             var song = Song(id: id, title: title, artist: artist, platform: "mg", album: album)
             song.nativeIDs = ["id": id, "songmid": id, "contentId": content, "copyrightId": copyright]
@@ -257,6 +298,10 @@ enum PoolCatalog {
 
     static func kugou(_ term: String) async throws -> [Song] {
         let bytes = try await fetch("https://songsearch.kugou.com/song_search_v2", ["keyword": term, "pagesize": "30", "page": "1"])
+        return try parseKugou(bytes)
+    }
+
+    fileprivate static func parseKugou(_ bytes: Data) throws -> [Song] {
         guard let root = try JSONSerialization.jsonObject(with: bytes) as? SourceJSON,
               root["status"] as? Int == 1, let page = root["data"] as? SourceJSON,
               let rows = page["lists"] as? [SourceJSON] else { throw URLError(.cannotParseResponse) }
@@ -264,8 +309,11 @@ enum PoolCatalog {
             guard let hash = row["FileHash"] as? String, hash.range(of: #"^[0-9a-fA-F]{32}$"#, options: .regularExpression) != nil,
                   let title = row["SongName"] as? String, let artist = row["SingerName"] as? String else { return nil }
             var ids = ["hash": hash]
-            for (field, name) in [("ID", "songmid"), ("AlbumID", "albumId"), ("HQFileHash", "320hash"), ("SQFileHash", "sqhash")] {
-                if let value = row[field] as? String, !value.isEmpty { ids[name] = value }
+            for (field, name) in [("ID", "songmid"), ("AlbumID", "albumId")] {
+                if let value = row[field] as? String ?? (row[field] as? NSNumber)?.stringValue, !value.isEmpty { ids[name] = value }
+            }
+            for (field, name) in [("HQFileHash", "320hash"), ("SQFileHash", "sqhash")] {
+                if let value = row[field] as? String, value.range(of: #"^[0-9a-fA-F]{32}$"#, options: .regularExpression) != nil { ids[name] = value }
             }
             return Song(id: hash, title: title, artist: artist, platform: "kg", nativeIDs: ids,
                         album: row["AlbumName"] as? String, duration: (row["Duration"] as? NSNumber)?.doubleValue)
@@ -274,6 +322,10 @@ enum PoolCatalog {
 
     static func kuwo(_ term: String) async throws -> [Song] {
         let data = try await fetch("https://search.kuwo.cn/r.s", ["all": term, "ft": "music", "itemset": "web_2013", "client": "kt", "pn": "0", "rn": "30", "rformat": "json", "encoding": "utf8", "mobi": "1"])
+        return try parseKuwo(data)
+    }
+
+    fileprivate static func parseKuwo(_ data: Data) throws -> [Song] {
         guard let root = try JSONSerialization.jsonObject(with: data) as? SourceJSON,
               let rows = root["abslist"] as? [SourceJSON] else { throw URLError(.cannotParseResponse) }
         return rows.compactMap { row in
