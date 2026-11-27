@@ -1,5 +1,5 @@
 import SwiftUI
-import AVFoundation
+import UniformTypeIdentifiers
 
 @main
 @MainActor struct CyMusicApp: App {
@@ -35,8 +35,9 @@ struct RootScreen: View {
     @EnvironmentObject private var library: Library
     @EnvironmentObject private var engine: SourceEngine
     @AppStorage("appearance") private var appearance = 0
-    private enum Page: Hashable { case discovery, library, search, settings }
-    @State private var page = Page.discovery
+    private enum Page: Hashable { case library, search, settings }
+    @State private var page = Page.library
+    @State private var importingSongs = false
     @State private var playerShown = false
     var body: some View {
         shell
@@ -60,7 +61,6 @@ struct RootScreen: View {
 
     @available(iOS 26.0, *) private var modernTabs: some View {
         TabView(selection: $page) {
-            Tab("发现", systemImage: "music.note", value: Page.discovery) { NavigationStack { DiscoveryScreen() } }
             Tab("资料库", systemImage: "music.note.list", value: Page.library) { NavigationStack { LibraryScreen() } }
             Tab("搜索", systemImage: "magnifyingglass", value: Page.search) { NavigationStack { SearchScreen() } }
             Tab("设置", systemImage: "gearshape", value: Page.settings) { settings }
@@ -69,7 +69,6 @@ struct RootScreen: View {
 
     private var legacyTabs: some View {
         TabView(selection: $page) {
-            NavigationStack { DiscoveryScreen() }.tabItem { Label("发现", systemImage: "music.note") }.tag(Page.discovery)
             NavigationStack { LibraryScreen() }.tabItem { Label("资料库", systemImage: "music.note.list") }.tag(Page.library)
             NavigationStack { SearchScreen() }.tabItem { Label("搜索", systemImage: "magnifyingglass") }.tag(Page.search)
             settings.tabItem { Label("设置", systemImage: "gearshape") }.tag(Page.settings)
@@ -79,11 +78,18 @@ struct RootScreen: View {
     private var settings: some View {
         NavigationStack {
             Form {
+                Section("本地音乐") { Button { importingSongs = true } label: { Label("导入歌曲", systemImage: "square.and.arrow.down") } }
                 Section("播放来源") { NavigationLink { SourcesScreen() } label: { Label("自定义音源", systemImage: "dot.radiowaves.left.and.right") } }
                 Section("音乐资料库") { NavigationLink { AppleLibraryScreen() } label: { Label("同步 Apple Music 资料库", systemImage: "arrow.triangle.2.circlepath") } }
                 Section("专辑封面") { AlbumCoverSyncButton() }
                 Section("外观") { Picker("主题", selection: $appearance) { Text("跟随系统").tag(0); Text("浅色").tag(1); Text("深色").tag(2) } }
             }.navigationTitle("设置")
+            .fileImporter(isPresented: $importingSongs, allowedContentTypes: [.audio], allowsMultipleSelection: true) { result in
+                switch result {
+                case .success(let urls): Task { await library.importFiles(urls) }
+                case .failure(let error): if (error as? CocoaError)?.code != .userCancelled { library.message = L10n.message(for: error) }
+                }
+            }
         }
     }
 
@@ -101,8 +107,8 @@ struct RootScreen: View {
                         .frame(width: compact ? 32 : 38, height: compact ? 32 : 38)
                         .clipShape(RoundedRectangle(cornerRadius: 6)).accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 0) {
-                        OutputRouteLabel()
                         Text(verbatim: song.title).font(.subheadline.weight(.semibold))
+                        Text(verbatim: song.artist.isEmpty ? "未知歌手" : song.artist).font(.caption).foregroundStyle(.secondary)
                     }.lineLimit(1)
                     Spacer(minLength: 0)
                 }.frame(minHeight: 44).contentShape(Rectangle())
@@ -123,22 +129,6 @@ struct RootScreen: View {
     @Environment(\.tabViewBottomAccessoryPlacement) private var placement
     let content: (Bool) -> Content
     var body: some View { content(placement == .inline) }
-}
-
-private struct OutputRouteLabel: View {
-    @State private var name = ""
-    private func refresh() {
-        let outputs = AVAudioSession.sharedInstance().currentRoute.outputs
-        name = outputs.map(\.portName).joined(separator: ", ")
-        if !name.isEmpty, outputs.contains(where: { $0.portType != .builtInSpeaker && $0.portType != .builtInReceiver }) {
-            name = UIDevice.current.localizedModel + " → " + name
-        }
-    }
-    var body: some View {
-        Text(verbatim: name).font(.caption2).foregroundStyle(.secondary)
-            .onAppear(perform: refresh)
-            .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification).receive(on: RunLoop.main)) { _ in refresh() }
-    }
 }
 
 private struct MiniArtwork: View {

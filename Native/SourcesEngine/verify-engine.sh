@@ -155,7 +155,13 @@ import Foundation
 SWIFT
 xcrun clang -fobjc-arc -c Runtime/CyMusicUserApiRuntime.m -o "$work/runtime.o"
 cp BulkQueueProbe.swiftfixture "$work/BulkQueueProbe.swift"
-xcrun swiftc -import-objc-header Runtime/CyMusicUserApiRuntime.h -framework JavaScriptCore -framework Security "$work/runtime.o" ../App/LanguageSettings.swift ../App/Song.swift Catalog.swift PoolCatalog.swift PoolMatcher.swift ProviderSession.swift SourceEngine.swift ../Discovery/DownloadCenter.swift ../Playback/PlaybackMedia.swift "$work/BulkQueueProbe.swift" "$work/Probe.swift" -o "$work/probe"
+python3 - "$work/Shelf.swift" <<'PY'
+from pathlib import Path
+import sys
+source = Path('../Library/LibraryScreen.swift').read_text().split('enum ShelfLyrics {', 1)[1].split('\n}', 1)[0]
+Path(sys.argv[1]).write_text('import Foundation\nenum ShelfLyrics {' + source + '\n}')
+PY
+xcrun swiftc "$work/Shelf.swift" -import-objc-header Runtime/CyMusicUserApiRuntime.h -framework JavaScriptCore -framework Security "$work/runtime.o" ../App/LanguageSettings.swift ../App/Song.swift Catalog.swift PoolCatalog.swift PoolMatcher.swift ProviderSession.swift SourceEngine.swift ../Discovery/DownloadCenter.swift ../Playback/PlaybackMedia.swift "$work/BulkQueueProbe.swift" "$work/Probe.swift" -o "$work/probe"
 if [[ $# -gt 0 && " ${*} " == *" --example "* ]]; then
     curl --fail --silent --show-error --max-time 20 'https://raw.githubusercontent.com/gyc-12/CyMusic-ImportMusicApi-Example/643dc33cb38a2eb3f72ac11b171100dd10834603/example1.js' -o "$work/example1.js"
 fi

@@ -1,6 +1,54 @@
 import XCTest
 
 final class NavigationTests: XCTestCase {
+    func testMenuFiltersPlaylistAndQueueRoundTrip() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launch()
+        let menu = app.buttons["library.menu"]
+        func choose(_ title: String) { menu.tap(); app.buttons[title].tap() }
+        func row(_ title: String) -> XCUIElement {
+            app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND NOT label ENDSWITH %@", title, "的操作")).firstMatch
+        }
+        choose("全部歌曲")
+        let mp3 = row("Shelf MP3")
+        try XCTSkipUnless(mp3.waitForExistence(timeout: 4), "Requires shelf fixture with timed lyric checkpoint: \(app.debugDescription)")
+        mp3.tap()
+        let flow = app.descendants(matching: .any)["library.coverflow"].firstMatch
+        let lyric = app.staticTexts["library.lyric"]
+        let checkpoint = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Menu checkpoint"), object: lyric)
+        XCTAssertEqual(XCTWaiter.wait(for: [checkpoint], timeout: 12), .completed)
+        app.buttons["library.center"].tap() // Pause at a nonzero lyric checkpoint.
+        menu.tap()
+        let first = app.buttons["我喜欢的"]
+        XCTAssertLessThan(first.frame.midX, app.frame.midX)
+        XCTAssertLessThan(first.frame.maxY, menu.frame.minY)
+        app.buttons["关闭菜单"].tap()
+        XCTAssertEqual(flow.value as? String, "Shelf MP3")
+        XCTAssertEqual(lyric.label, "Menu checkpoint")
+        choose("专辑列表")
+        XCTAssertNotEqual(flow.value as? String, "Shelf MP3")
+        choose("返回播放队列")
+        XCTAssertEqual(flow.value as? String, "Shelf MP3")
+        XCTAssertEqual(lyric.label, "Menu checkpoint")
+        choose("我喜欢的")
+        XCTAssertFalse(row("Shelf MP3").exists)
+        XCTAssertTrue(app.staticTexts["暂无歌曲"].exists)
+        app.buttons["完成"].tap()
+        app.buttons["library.toolbarMenu"].tap(); app.buttons["歌单列表"].tap()
+        app.buttons["新建歌单"].tap()
+        let alert = app.alerts["新建歌单"]
+        alert.textFields.firstMatch.tap(); alert.textFields.firstMatch.typeText("Menu QA")
+        alert.buttons["创建"].tap()
+        let list = app.buttons["Menu QA"]
+        list.tap()
+        XCTAssertTrue(app.staticTexts["暂无歌曲"].exists)
+        XCTAssertFalse(mp3.exists)
+        app.buttons["完成"].tap()
+        choose("歌单列表"); list.swipeLeft()
+        if app.buttons["删除"].exists { app.buttons["删除"].tap() }
+        XCTAssertTrue(list.waitForNonExistence(timeout: 4))
+    }
     func testLocalCoverFlowChangesPlayback() throws {
         let app = XCUIApplication()
         app.launchArguments += ["-AppleLanguages", "(zh-Hans)", "-app.language", "zh-Hans"]
@@ -71,18 +119,50 @@ final class NavigationTests: XCTestCase {
         XCTAssertTrue(actions.exists)
     }
 
+    // Seed and verify with LegacyTests/cache-delete-fixture.py on a disposable simulator.
+    func testCacheDeletionFromMenuAndAlbumSurvivesRelaunch() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        func openLibrary() { app.launch(); app.tabBars.buttons["资料库"].tap() }
+        func collection() { app.buttons["library.menu"].firstMatch.tap(); app.buttons["全部歌曲"].firstMatch.tap() }
+        func confirm(_ title: String) {
+            app.buttons["删除缓存歌曲"].tap()
+            let alert = app.alerts["删除缓存歌曲？"]
+            XCTAssertTrue(alert.staticTexts[title].waitForExistence(timeout: 4))
+            let button = alert.buttons["删除"]
+            // On iOS 18 the accessibility alert appears before the sheet's
+            // context-menu dismissal finishes and a tap is otherwise swallowed.
+            let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: button)
+            XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 4), .completed)
+            button.tap()
+            if !alert.waitForNonExistence(timeout: 1) && button.isHittable { button.tap() }
+            XCTAssertTrue(alert.waitForNonExistence(timeout: 4))
+        }
+        openLibrary(); collection()
+        let a = app.buttons["Cache Fixture A 的操作"], b = app.buttons["Cache Fixture B 的操作"]
+        try XCTSkipUnless(a.waitForExistence(timeout: 3) && b.exists, "Requires cache deletion fixture")
+        a.tap(); confirm("Cache Fixture A")
+        XCTAssertTrue(a.waitForNonExistence(timeout: 4), app.debugDescription); XCTAssertTrue(b.exists)
+        app.buttons["完成"].tap(); app.buttons["library.openAlbum"].tap()
+        let track = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Cache Fixture B")).firstMatch
+        XCTAssertTrue(track.waitForExistence(timeout: 5)); track.press(forDuration: 1)
+        confirm("Cache Fixture B"); XCTAssertFalse(track.exists)
+        app.terminate(); openLibrary(); collection()
+        XCTAssertFalse(a.exists); XCTAssertFalse(b.exists)
+        XCTAssertTrue(app.buttons["Cache Fixture Original 的操作"].exists)
+    }
+
     func testNativeTabNavigation() throws {
         let app = XCUIApplication(); app.launchArguments += ["-AppleLanguages", "(en-US)", "-AppleLocale", "en_US", "-app.language", "en"]; app.launch()
         let settings = app.tabBars.buttons["设置"]
-        XCTAssertEqual(app.tabBars.buttons.allElementsBoundByIndex.map(\.label), ["发现", "资料库", "搜索", "设置"])
+        XCTAssertEqual(app.tabBars.buttons.allElementsBoundByIndex.map(\.label), ["资料库", "搜索", "设置"])
         XCTAssertTrue(settings.waitForExistence(timeout: 10)); settings.tap()
         let sources = app.buttons["自定义音源"]
         XCTAssertTrue(sources.waitForExistence(timeout: 4)); sources.tap()
         XCTAssertTrue(app.navigationBars.buttons.element(boundBy: 0).waitForExistence(timeout: 4))
         app.tabBars.buttons["搜索"].tap()
         XCTAssertTrue(app.tabBars.buttons["搜索"].isSelected)
-        app.tabBars.buttons["发现"].tap()
-        XCTAssertTrue(app.tabBars.buttons["发现"].isSelected)
+        XCTAssertFalse(app.tabBars.buttons["发现"].exists)
         app.tabBars.buttons["资料库"].tap()
         XCTAssertTrue(app.tabBars.buttons["资料库"].isSelected)
     }

@@ -231,8 +231,10 @@ final class Library: ObservableObject {
   }
   private func localFile(_ song: Song) -> URL? {
     func valid(_ file: URL?) -> URL? {
+      // URL instances can carry cached isRegularFile values after unlink.
+      // Always inspect the current path, including when rebuilding on reopen.
       guard let file, file.isFileURL,
-        (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+        (try? FileManager.default.attributesOfItem(atPath: file.path)[.type] as? FileAttributeType) == .typeRegular
       else { return nil }
       return file
     }
@@ -418,34 +420,64 @@ final class Library: ObservableObject {
     }
     let fm = FileManager.default
     let support = index.deletingLastPathComponent().deletingLastPathComponent()
-      .resolvingSymlinksInPath()
-    let cache = support.appendingPathComponent("PlaybackCache")
-    let docs = documents.resolvingSymlinksInPath()
-    let roots =
-      (LegacyMigration.audioFolders + ["Imported Music"]).map { docs.appendingPathComponent($0) }
-      + [cache]
-    var candidates = [localFile(original)].compactMap { $0 }
-    #if os(iOS)
-      let folder = PlaybackFiles.folder(original)
-      if let entries = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) {
-        candidates += entries.filter { $0.deletingPathExtension().lastPathComponent == "audio" }
+    let roots = ((LegacyMigration.audioFolders + ["Imported Music"]).map { (documents, $0) }
+      + [(support, "PlaybackCache")]).map { base, name in
+        (base.appendingPathComponent(name).path, base.resolvingSymlinksInPath().appendingPathComponent(name).path)
       }
-    #endif
-    let shared = Set(
-      store.songs.filter { $0.id != song.id }.compactMap {
-        localFile($0)?.resolvingSymlinksInPath().path
-      })
+    // Accept container aliases (/var vs /private/var), but never follow a link
+    // within an owned directory or treat an external file-picker URL as ours.
+    func ownedPath(_ file: URL) -> String? {
+      guard file.isFileURL, !file.pathComponents.contains("..") else { return nil }
+      for (root, canonicalRoot) in roots {
+        for prefix in [root, canonicalRoot] where file.path.hasPrefix(prefix + "/") {
+          let path = canonicalRoot + file.path.dropFirst(prefix.count)
+          if URL(fileURLWithPath: path).resolvingSymlinksInPath().path == path { return path }
+        }
+      }
+      return nil
+    }
+    func registeredFiles(_ track: Song) -> [URL] {
+      [store.documentsPaths[track.id].map { documents.appendingPathComponent($0) },
+       store.supportPaths?[track.id].map { support.appendingPathComponent($0) },
+       store.externalFiles?[track.id], track.url, localFile(track)].compactMap { $0 }.filter(\.isFileURL)
+    }
+    func lyrics(_ path: String) -> String {
+      URL(fileURLWithPath: path).deletingPathExtension().appendingPathExtension("lrc").path
+    }
+    let shared = Set(store.songs.filter { $0.id != song.id && store.removedCacheIDs?.contains($0.id) != true }
+      .flatMap(registeredFiles).map { $0.resolvingSymlinksInPath().path })
+    let sharedLyrics = Set(shared.map(lyrics))
+    // URL resource values may remain cached after unlink. Compare paths, not
+    // URL representations, and let ENOENT mean that cleanup already finished.
+    func unlinkRegular(_ path: String) throws {
+      guard ownedPath(URL(fileURLWithPath: path)) == path else { return }
+      do {
+        guard try fm.attributesOfItem(atPath: path)[.type] as? FileAttributeType == .typeRegular else { return }
+        try fm.removeItem(atPath: path)
+      } catch let error as CocoaError where [.fileNoSuchFile, .fileReadNoSuchFile].contains(error.code) {}
+    }
     do {
-      for file in Set(candidates) {
-        let resolved = file.resolvingSymlinksInPath().standardizedFileURL
-        guard roots.contains(where: { resolved.path.hasPrefix($0.standardizedFileURL.path + "/") }),
-          !shared.contains(resolved.path),
-          UTType(filenameExtension: file.pathExtension)?.conforms(to: .audio) == true
-            || (resolved.path.hasPrefix(cache.path + "/")
-              && file.deletingPathExtension().lastPathComponent == "audio"),
-          (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
-        else { continue }
-        try fm.removeItem(at: file)
+      // An original's URL can also be its import source, not its cache.
+      var candidates = [localFile(original)].compactMap { $0 }
+      if let relative = store.supportPaths?[song.id] { candidates.append(support.appendingPathComponent(relative)) }
+      if let relative = store.documentsPaths[song.id] { candidates.append(documents.appendingPathComponent(relative)) }
+      #if os(iOS)
+        let folder = PlaybackFiles.folder(original)
+        if ownedPath(folder) != nil {
+          do {
+            candidates += try fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+              .filter { $0.deletingPathExtension().lastPathComponent == "audio" }
+          } catch let error as CocoaError where [.fileNoSuchFile, .fileReadNoSuchFile].contains(error.code) {}
+        }
+      #endif
+      for path in Set(candidates.compactMap(ownedPath)).subtracting(shared) {
+        let file = URL(fileURLWithPath: path)
+        let ext = file.pathExtension.lowercased()
+        guard UTType(filenameExtension: ext)?.conforms(to: .audio) == true
+          || ["mp4", "flac", "opus", "ogg"].contains(ext) else { continue }
+        let sidecar = lyrics(path)
+        if !sharedLyrics.contains(sidecar) { try unlinkRegular(sidecar) }
+        try unlinkRegular(path)
       }
     } catch {
       message = "无法删除缓存音频：\(L10n.message(for: error))"
@@ -461,6 +493,9 @@ final class Library: ObservableObject {
       || (!next.favoriteIDs.contains(song.id)
         && !next.playlists.contains(where: { $0.songIDs.contains(song.id) }))
     {
+      // Replacement covers are content-addressed and may serve another song
+      // or album. Drop the orphaned reference, not the shared image file.
+      next.songArtwork?[song.id] = nil
       next.songs.removeAll { $0.id == song.id }
       next.favoriteIDs.removeAll { $0 == song.id }
       for i in next.playlists.indices { next.playlists[i].songIDs.removeAll { $0 == song.id } }

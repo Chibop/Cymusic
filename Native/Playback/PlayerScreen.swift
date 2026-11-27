@@ -4,7 +4,8 @@ import SwiftUI
 struct PlayerScreen: View {
   @EnvironmentObject var playback: Playback
   @Environment(\.dismiss) private var dismiss
-  @State private var lyrics = false
+  @State private var lyrics = true
+  @State private var picker: LyricPickerContext?
   @State private var showQueue = false
   @State private var scrub: Double?
   @AppStorage("playback.lyricSize") private var lyricSize = 23.0
@@ -41,9 +42,13 @@ struct PlayerScreen: View {
         } else if lyrics {
           PlaybackLyrics(
             raw: playback.current?.lyrics, elapsed: playback.elapsed, size: lyricSize,
-            offset: lyricOffset, seek: playback.seek)
+            offset: lyricOffset, seek: playback.seek).id(playback.current?.lyrics)
           HStack {
             icon("rectangle.stack", "返回封面") { lyrics = false }
+            Spacer()
+            Button("歌词版本") {
+              if let song = playback.current { picker = LyricPickerContext(id: playback.generation, song: song) }
+            }
             Spacer()
             lyricMenu
           }.padding(.horizontal, 26)
@@ -143,7 +148,9 @@ struct PlayerScreen: View {
         width: geo.size.width, height: geo.size.height)
     }.environment(\.colorScheme, .dark).sheet(isPresented: $showQueue) {
       PlaybackQueue().environmentObject(playback)
-    }.onChange(of: playback.current?.id) { _ in scrub = nil }.onChange(of: lyrics) { _ in
+    }.sheet(item: $picker) { context in
+      LyricVersionPicker(context: context).environmentObject(playback)
+    }.onChange(of: playback.generation) { _ in scrub = nil; picker = nil }.onChange(of: lyrics) { _ in
       updateIdle()
     }.onChange(of: keepAwake) { _ in updateIdle() }.onDisappear { restoreIdle() }.onAppear {
       updateIdle()
@@ -245,8 +252,9 @@ private struct PlaybackLyrics: View {
   var raw: String?, elapsed: Double, size: Double, offset: Double, seek: (Double) -> Void
   @State private var lines: [PlaybackLyric] = []
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  var active: Int? { lines.last { ($0.time ?? .infinity) <= elapsed + offset }?.id }
+  var active: Int? { PlaybackLyric.active(at: elapsed + offset, in: lines) }
   var body: some View {
+    let active = self.active
     GeometryReader { geo in
       ScrollViewReader { proxy in
         ScrollView {
@@ -271,8 +279,8 @@ private struct PlaybackLyrics: View {
               .vertical, lines.first?.time != nil ? geo.size.height * 0.43 : 22)
           }
         }.onChange(of: active) { id in
-          if let id {
-            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.22)) {
+          if let id = id ?? lines.first?.id {
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.10)) {
               proxy.scrollTo(id, anchor: .center)
             }
           }

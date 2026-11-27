@@ -75,66 +75,55 @@ private struct SearchSongLabel: View {
 }
 
 // Owned by the search tab, not by the pushed view: returning to the same result
-// keeps the selected route and both qualities without repeating a successful match.
+// keeps its completed matches. An interrupted lookup restarts on return.
 @MainActor private final class SongDestination: ObservableObject {
     @Published var seed: Song?
     @Published var scriptID: String?
     private var scriptText: String?
     @Published var sites = [String]()
-    @Published var site: String?
-    @Published var match: Song?
-    @Published var levels = [String]()
-    @Published var audition = ""
-    @Published var download = ""
-    @Published var error: String?
+    @Published var matches = [String: Song]()
+    @Published var failures = [String: String]()
+    @Published var levels = [String: [String]]()
     @Published var busy = false
     private var task: Task<Void, Never>?
 
     func open(_ seed: Song, engine: SourceEngine) {
-        let script = engine.scripts.first { $0.id == scriptID }
-        if self.seed != seed {
-            self.seed = seed
-            selectScript(script, engine: engine)
-        } else if script?.text != scriptText { selectScript(script, engine: engine) }
+        let script = engine.scripts.first { $0.id == scriptID } ?? engine.scripts.first
+        if self.seed != seed { self.seed = seed; selectScript(script, engine: engine) }
+        else if script?.id != scriptID || script?.text != scriptText || (script != nil && !busy && sites.count > matches.count + failures.count) { selectScript(script, engine: engine) }
     }
 
-    func cancel() {
-        task?.cancel(); task = nil; busy = false; error = "已取消，可重新尝试。"
-    }
-
-    private func resetMatch() {
-        cancel(); error = nil; match = nil; levels = []; audition = ""; download = ""
-    }
+    func cancel() { task?.cancel(); task = nil; busy = false }
 
     func selectScript(_ script: SourceScript?, engine: SourceEngine) {
-        resetMatch(); sites = []; site = nil; scriptID = script?.id; scriptText = script?.text
-        guard let script else { return }
+        cancel(); sites = []; matches = [:]; failures = [:]; levels = [:]
+        scriptID = script?.id; scriptText = script?.text
+        guard let script, let seed else { return }
         busy = true
         task = Task {
             defer { if !Task.isCancelled { busy = false } }
             do {
-                let found = try await engine.declaredDownloadPlatforms(for: script)
-                try Task.checkCancellation()
-                sites = found
-                if found.isEmpty { error = "此脚本没有声明可解析音乐地址的站点。" }
-            } catch { if !Task.isCancelled { self.error = L10n.message(for: error) } }
-        }
-    }
-
-    func selectSite(_ site: String?, script: SourceScript, engine: SourceEngine) {
-        resetMatch(); self.site = site
-        guard let seed, let site, sites.contains(site) else { return }
-        busy = true
-        task = Task {
-            defer { if !Task.isCancelled { busy = false } }
-            do {
-                let found = try await engine.matchCatalogSong(seed, script: script, platform: site)
-                try Task.checkCancellation()
-                let declared = try await engine.availableLevels(for: found, script: script)
-                try Task.checkCancellation()
-                guard let first = declared.first else { error = "此站点未声明可用音质。"; return }
-                levels = declared; audition = first; download = first; match = found
-            } catch { if !Task.isCancelled { self.error = "匹配失败：\(L10n.message(for: error))" } }
+                let targets = try await engine.declaredDownloadPlatforms(for: script)
+                try Task.checkCancellation(); sites = targets
+                guard !targets.isEmpty else { return }
+                await withTaskGroup(of: (String, Song?, [String], String?).self) { group in
+                    for site in targets {
+                        group.addTask {
+                            do {
+                                let found = try await engine.matchCatalogSong(seed, script: script, platform: site)
+                                let qualities = try await engine.availableLevels(for: found, script: script)
+                                return (site, found, qualities, qualities.isEmpty ? "站点未声明可用音质" : nil)
+                            }
+                            catch let error as SourceFailure { return (site, nil, [], L10n.message(for: error)) }
+                            catch { return (site, nil, [], "站点暂不可用：\(L10n.message(for: error))") }
+                        }
+                    }
+                    for await (site, song, qualities, error) in group {
+                        guard !Task.isCancelled else { return }
+                        if let song, error == nil { matches[site] = song; levels[site] = qualities } else { failures[site] = error ?? "未找到匹配曲目" }
+                    }
+                }
+            } catch { if !Task.isCancelled { failures["_"] = L10n.message(for: error) } }
         }
     }
 }
@@ -145,114 +134,98 @@ private struct SearchSongDestination: View {
     @EnvironmentObject private var engine: SourceEngine
     @EnvironmentObject private var playback: Playback
     @EnvironmentObject private var downloads: DownloadCenter
-    @State private var confirmStop = false
+
     private var script: SourceScript? { engine.scripts.first { $0.id == route.scriptID } }
 
     var body: some View {
         List {
             Section("目录歌曲") { SearchSongLabel(song: seed) }
-            Section("目标音源") {
-                Picker("脚本", selection: Binding(get: { route.scriptID }, set: { id in
-                    route.selectScript(engine.scripts.first { $0.id == id }, engine: engine)
-                })) {
-                    Text("请选择").tag(String?.none)
-                    ForEach(engine.scripts) { Text($0.name).tag(Optional($0.id)) }
-                }.disabled(engine.scripts.isEmpty)
-                if engine.scripts.isEmpty { Text("请先在设置中导入音源脚本。").foregroundStyle(.secondary) }
-                if let script, !route.sites.isEmpty {
-                    Picker("站点", selection: Binding(get: { route.site }, set: { route.selectSite($0, script: script, engine: engine) })) {
-                        Text("请选择").tag(String?.none)
-                        ForEach(route.sites, id: \.self) { Text(ScopedSearchPlatform.name($0)).tag(Optional($0)) }
+            Section("按脚本查询全部站点") {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack {
+                        ForEach(engine.scripts) { item in
+                            let selected = route.scriptID == item.id
+                            Button(item.name) { route.selectScript(item, engine: engine) }
+                                .buttonStyle(.bordered).tint(selected ? .accentColor : .secondary)
+                                .accessibilityAddTraits(selected ? .isSelected : [])
+                                .accessibilityIdentifier("search.script.\(item.id)")
+                        }
                     }
                 }
-                if route.busy {
-                    ProgressView(route.site == nil ? "正在读取站点…" : "正在匹配歌曲与音质…")
-                    Button("取消") { route.cancel() }
-                } else if let error = route.error, let script {
-                    Text(error).foregroundStyle(.secondary)
-                    Button("重试") {
-                        if let site = route.site { route.selectSite(site, script: script, engine: engine) }
-                        else { route.selectScript(script, engine: engine) }
-                    }
+                if engine.scripts.isEmpty { Text("请先在设置中导入音源脚本。").foregroundStyle(.secondary) }
+                if route.busy { ProgressView("正在查询所有可用站点…") }
+                if let failure = route.failures["_"] { Text(failure).foregroundStyle(.secondary) }
+                if !route.busy, route.sites.isEmpty, script != nil {
+                    Text("脚本未声明可用下载站点。") .foregroundStyle(.secondary)
                 }
             }
-            if let match = route.match, route.seed == seed {
-                Section("站点匹配结果") { SearchSongLabel(song: match) }
-                auditionSection(match)
-                downloadSection(match)
+            ForEach(route.sites, id: \.self) { site in
+                if let song = route.matches[site] {
+                    Section {
+                        SearchSongLabel(song: song)
+                        Text("\(ScopedSearchPlatform.name(site)) · \(song.duration.map(clock) ?? "时长未知")")
+                            .font(.caption).foregroundStyle(.secondary)
+                        ForEach(route.levels[site] ?? [], id: \.self) { level in
+                            qualityActions(song: song, site: site, level: level)
+                        }
+                    } header: { Text("\(ScopedSearchPlatform.name(site)) · 站点原生曲目") }
+                } else if let failure = route.failures[site] {
+                    Section("\(ScopedSearchPlatform.name(site))") { Text(failure).foregroundStyle(.secondary) }
+                }
             }
         }
         .navigationTitle("选择音源").navigationBarTitleDisplayMode(.inline)
         .onAppear { route.open(seed, engine: engine) }
         .onChange(of: script?.text) { _ in route.open(seed, engine: engine) }
-        .onDisappear { if route.busy { route.cancel() } }
+
     }
 
     private func requested(_ song: Song, _ quality: String) -> Song {
-        var copy = song; copy.requestedQuality = quality; return copy
+        var copy = song; copy.searchScriptID = route.scriptID; copy.requestedQuality = quality; return copy
     }
 
-    private func isCurrent(_ song: Song) -> Bool {
-        guard let current = playback.current else { return false }
-        return current.id == song.id && current.platform == song.platform && current.searchScriptID == song.searchScriptID && current.requestedQuality != nil
-    }
-
-    private func auditionSection(_ song: Song) -> some View {
-        let current = isCurrent(song)
-        return Section("试听") {
-            qualityPicker("试听音质", selection: Binding(get: { route.audition }, set: { level in
-                guard route.audition != level else { return }; route.audition = level
-                if isCurrent(song) && (playback.isPlaying || playback.loading) { playback.play([requested(song, level)], index: 0) }
-            }))
-            if current && playback.loading {
-                ProgressView("正在准备试听…")
-                Button("取消试听") { playback.clear() }
-            } else if current && playback.isPlaying {
-                Button("暂停试听") { playback.pause() }
-            } else {
-                Button("播放试听") { playback.play([requested(song, route.audition)], index: 0) }
-            }
-            if current {
-                if let error = playback.errorMessage { Text("试听失败：\(error)").foregroundStyle(.secondary) }
-                if playback.duration > 0 {
-                    ProgressView(value: min(max(0, playback.elapsed), playback.duration), total: playback.duration)
-                    Text("\(clock(playback.elapsed)) / \(clock(playback.duration))").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+    private func qualityActions(song: Song, site: String, level: String) -> some View {
+        let item = requested(song, level), key = DownloadCenter.Key(item)
+        let current = playback.current.map { DownloadCenter.Key($0) == key } ?? false
+        return VStack(alignment: .leading) {
+            HStack {
+                Text(L10n.quality(level)).font(.subheadline)
+                Spacer()
+                Button {
+                    if current && playback.loading { playback.clear() }
+                    else if current && playback.isPlaying { playback.pause() }
+                    else if current && playback.errorMessage == nil { playback.resume() }
+                    else { playback.play([item], index: 0) }
+                } label: {
+                    Label(current && playback.loading ? "取消试听" : current && playback.isPlaying ? "暂停" : "播放",
+                          systemImage: current && playback.isPlaying ? "pause.fill" : "play.fill")
+                }.accessibilityIdentifier("search.play.\(site).\(level)")
+                if downloads.pending.contains(key) {
+                    if downloads.isPaused { Button("继续队列") { downloads.resume() } }
+                    else if let value = downloads.progress(for: item) { ProgressView(value: value).frame(width: 56) }
+                    else { ProgressView("等待下载") }
+                } else if downloads.localFile(item) != nil {
+                    Label("已下载", systemImage: "checkmark.circle").font(.caption)
+                } else {
+                    Button { downloads.enqueue([item]) } label: { Label("下载", systemImage: "arrow.down.circle") }
+                        .accessibilityIdentifier("search.download.\(site).\(level)")
                 }
+            }.buttonStyle(.borderless)
+            if current && playback.loading { ProgressView("正在准备试听…") }
+            if current, playback.duration > 0 {
+                ProgressView(value: min(max(0, playback.elapsed), playback.duration), total: playback.duration)
+                Text("\(clock(playback.elapsed)) / \(clock(playback.duration))").font(.caption.monospacedDigit())
             }
+            if current, let message = playback.errorMessage {
+                Text(message).font(.caption).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("search.playError.\(site).\(level)")
+            }
+            if let message = downloads.failures[key] { Text(message).font(.caption).foregroundStyle(.secondary) }
         }
     }
 
     private func clock(_ value: Double) -> String {
         let seconds = value.isFinite ? Int(max(0, value)) : 0
         return String(format: "%d:%02d", seconds / 60, seconds % 60)
-    }
-
-    private func qualityPicker(_ title: String, selection: Binding<String>) -> some View {
-        Picker(title, selection: selection) {
-            ForEach(route.levels, id: \.self) { Text(L10n.quality($0)).tag($0) }
-        }.pickerStyle(.menu)
-    }
-
-    private func downloadSection(_ match: Song) -> some View {
-        let song = requested(match, route.download), key = DownloadCenter.Key(song)
-        return Section("下载") {
-            qualityPicker("下载音质", selection: $route.download)
-            if let message = downloads.failures[key] { Text("下载失败：\(message)").foregroundStyle(.secondary) }
-            if downloads.pending.contains(key) {
-                if downloads.isPaused { Text("下载队列已暂停"); Button("继续下载队列") { downloads.resume() } }
-                else if let value = downloads.progress(for: song) {
-                    ProgressView(value: value) { Text("正在下载") } currentValueLabel: { Text(value, format: .percent) }
-                } else { ProgressView("等待下载…") }
-                Button("取消下载队列", role: .destructive) { confirmStop = true }
-                    .confirmationDialog("取消队列中的全部 \(downloads.pending.count) 项下载？", isPresented: $confirmStop, titleVisibility: .visible) {
-                        Button("取消全部下载", role: .destructive) { downloads.stop() }
-                        Button("保留下载", role: .cancel) {}
-                    }
-            } else if downloads.localFile(song) != nil {
-                Label("已下载", systemImage: "checkmark.circle")
-            } else {
-                Button("下载歌曲") { downloads.enqueue([song]) }
-            }
-        }
     }
 }

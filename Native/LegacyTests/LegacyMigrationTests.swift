@@ -47,6 +47,7 @@ import MMKV
         precondition(tracks.first?.url?.standardizedFileURL.path == audio.standardizedFileURL.path && library.songs.count == 2, "tracks=\(library.songs) expected=\(audio)")
         let original = try pair.map { try Data(contentsOf: $0) }
         precondition(original == bytes)
+        try checkCacheDeletion(root.appendingPathComponent("deletion"))
         library.deletePlaylist(library.playlists[1].id)
         library.favorite(library.favorites[0])
         var damaged = bytes[0]; damaged[10] ^= 1
@@ -59,5 +60,34 @@ import MMKV
         try Data([0xff]).write(to: saved); precondition(open().message != nil)
         let preserved = try Data(contentsOf: saved); precondition(preserved == Data([0xff]))
         print("PASS: official MMKV fixture, retry, native merge, file relocation, source strings, original bytes, one-time marker, corrupt input and index")
+    }
+
+    static func checkCacheDeletion(_ root: URL) throws {
+        let fm = FileManager.default, docs = root.appendingPathComponent("Documents")
+        let support = root.appendingPathComponent("Support"), index = support.appendingPathComponent("Index")
+        let audio = support.appendingPathComponent("PlaybackCache/shared/audio.wav")
+        let lrc = audio.deletingPathExtension().appendingPathExtension("lrc")
+        let external = docs.appendingPathComponent("Original.wav")
+        for directory in [docs, audio.deletingLastPathComponent()] {
+            try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+        for file in [audio, lrc, external] { try Data([1]).write(to: file) }
+        func open() -> Library { Library(documents: docs, directory: index) }
+        let library = open(), a = Song(id: "a", title: "A", artist: "Test", platform: "fixture")
+        var b = a; b.id = "b"
+        library.registerCache(a, audio); library.registerCache(b, audio)
+        library.favorite(a); library.importPlaylist("Pair", songs: [a,b]); library.removeCachedTrack(a)
+        precondition(library.localSongs.map(\.id) == [b.id] && fm.fileExists(atPath: lrc.path))
+        library.removeCachedTrack(b); library.removeCachedTrack(b)
+        let reopened = open()
+        precondition(reopened.localSongs.isEmpty && reopened.favorites.map(\.id) == [a.id])
+        precondition(reopened.playlists.first?.songIDs == [a.id,b.id])
+        precondition(!fm.fileExists(atPath: audio.path) && !fm.fileExists(atPath: lrc.path))
+        try Data([2]).write(to: audio); try fm.createSymbolicLink(at: lrc, withDestinationURL: external)
+        reopened.registerCache(a, audio); reopened.removeCachedTrack(a)
+        precondition(fm.fileExists(atPath: external.path) && fm.fileExists(atPath: lrc.path))
+        reopened.registerCache(b, external); reopened.removeCachedTrack(b)
+        precondition(fm.fileExists(atPath: external.path) && open().localSongs.isEmpty && reopened.message == nil)
+        print("PASS: shared cache, lyric ownership and symlink, external file, idempotent deletion, reopened memberships")
     }
 }

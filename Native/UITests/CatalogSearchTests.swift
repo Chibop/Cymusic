@@ -21,6 +21,29 @@ final class CatalogSearchTests: XCTestCase {
         XCTAssertTrue(submit.isEnabled)
     }
 
+    // The simulator fixture installs two scripts named Destination QA A and B.
+    func testScriptTabsQueryEverySiteAndExposeTierActions() throws {
+        let app = openSearch()
+        app.textFields["search.query"].tap()
+        app.textFields["search.query"].typeText("Adele Hello\n")
+        let result = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'search.result.'")).firstMatch
+        try XCTSkipUnless(result.waitForExistence(timeout: 35), "Apple catalog unavailable")
+        result.tap()
+        let first = app.buttons["search.script.destination-qa-a"]
+        let second = app.buttons["search.script.destination-qa-b"]
+        try XCTSkipUnless(first.waitForExistence(timeout: 5) && second.exists, "Requires destination QA script fixtures")
+        first.tap()
+        for site in ["kg", "kw"] {
+            XCTAssertTrue(app.buttons["search.play.\(site).128k"].waitForExistence(timeout: 12))
+            XCTAssertTrue(app.buttons["search.download.\(site).320k"].exists)
+        }
+        second.tap()
+        XCTAssertTrue(app.buttons["search.play.mg.128k"].waitForExistence(timeout: 12))
+        XCTAssertFalse(app.buttons["search.play.kg.128k"].exists)
+        app.buttons["search.play.mg.128k"].tap()
+        XCTAssertTrue(app.staticTexts["search.playError.mg.128k"].waitForExistence(timeout: 10))
+    }
+
     func testLiveCatalogResultNavigatesBackWithoutLosingResults() throws {
         let app = openSearch()
         let query = app.textFields["search.query"]

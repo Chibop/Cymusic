@@ -72,31 +72,21 @@ struct PlaybackLyric: Identifiable {
   let text: String
   static func parse(_ input: String?) -> [Self] {
     guard let input else { return [] }
-    let stamp = try! NSRegularExpression(pattern: #"\[(\d+):(\d{1,2}(?:[\.:]\d+)?)\]"#)
-    let offsetRegex = try! NSRegularExpression(pattern: #"(?i)\[offset:\s*([+-]?\d+)\s*\]"#)
-    let ns = input as NSString
-    let offset =
-      offsetRegex.firstMatch(in: input, range: NSRange(location: 0, length: ns.length)).flatMap {
-        Double(ns.substring(with: $0.range(at: 1)))
-      }.map { $0 / 1000 } ?? 0
-    var lines: [Self] = []
-    for row in input.components(separatedBy: .newlines) {
-      let s = row as NSString
-      let range = NSRange(location: 0, length: (row as NSString).length)
-      let matches = stamp.matches(in: row, range: range)
-      let text = stamp.stringByReplacingMatches(in: row, range: range, withTemplate: "")
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-      guard !text.isEmpty, !text.hasPrefix("[") || !text.hasSuffix("]") else { continue }
-      if matches.isEmpty { lines.append(Self(id: lines.count, time: nil, text: text)) }
-      for match in matches {
-        guard let minutes = Double(s.substring(with: match.range(at: 1))),
-          let seconds = Double(
-            s.substring(with: match.range(at: 2)).replacingOccurrences(of: ":", with: "."))
-        else { continue }
-        lines.append(
-          Self(id: lines.count, time: max(0, minutes * 60 + seconds - offset), text: text))
-      }
+    let cues = ShelfLyrics.parse(input)
+    if !cues.isEmpty {
+      return cues.enumerated().map { Self(id: $0.offset, time: $0.element.time, text: $0.element.text) }
     }
-    return lines.sorted { ($0.time ?? .infinity, $0.id) < ($1.time ?? .infinity, $1.id) }
+    let rows = input.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }
+    return rows.filter { !$0.isEmpty && !($0.hasPrefix("[") && $0.hasSuffix("]")) }
+      .enumerated().map { Self(id: $0.offset, time: nil, text: $0.element) }
+  }
+
+  static func active(at time: Double, in lines: [Self]) -> Int? {
+    var low = 0, high = lines.count
+    while low < high {
+      let mid = low + (high - low) / 2
+      if let cue = lines[mid].time, cue <= time { low = mid + 1 } else { high = mid }
+    }
+    return low > 0 ? lines[low - 1].id : nil
   }
 }

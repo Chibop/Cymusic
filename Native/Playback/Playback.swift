@@ -55,7 +55,10 @@ enum PlaybackMode: String, CaseIterable {
   var cached: ((Song, URL) -> Void)?
   var downloadFromPool: ((Song) async throws -> (URL, String))?
   private let player = AVPlayer()
-  private var generation = UUID(), wantsAudio = false, interrupted = false, finished = false
+  @Published private(set) var generation = UUID()
+  @Published private(set) var lyricVersion: LyricVersion?
+  private var seekClock = PlaybackSeekClock()
+  private var wantsAudio = false, interrupted = false, finished = false
   private var lyricTask: Task<Void, Never>?
   private var lyricsIdentity: Song?
   private var source: URL?, artwork: MPMediaItemArtwork?
@@ -76,7 +79,7 @@ enum PlaybackMode: String, CaseIterable {
   init() {
     observers.player = player
     observers.clock = player.addPeriodicTimeObserver(
-      forInterval: CMTime(seconds: 0.25, preferredTimescale: 600), queue: .main
+      forInterval: CMTime(seconds: 0.075, preferredTimescale: 600), queue: .main
     ) { [weak self] _ in Task { @MainActor in self?.tick() } }
     control = player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
       Task { @MainActor in self?.refresh() }
@@ -176,7 +179,10 @@ enum PlaybackMode: String, CaseIterable {
     player.pause()
     player.replaceCurrentItem(with: nil)
     index = i
+    seekClock = PlaybackSeekClock()
+    lyricVersion = LyricSelection.read(LyricSelection.file(for: song))
     current = song
+    if let lyricVersion { current?.lyrics = lyricVersion.text }
     lyricsIdentity = nil
     elapsed = 0
     duration = 0
@@ -230,15 +236,7 @@ enum PlaybackMode: String, CaseIterable {
           url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: self.preciseSeeking])
         let item = AVPlayerItem(asset: asset)
         self.player.replaceCurrentItem(with: item)
-        self.lyricTask = Task { @MainActor [weak self] in
-          await SourceCatalog.applyLyrics(for: lyricSong, isCurrent: {
-            self?.generation == token && self?.current?.id == song.id && self?.current?.platform == song.platform
-          }, apply: { text in
-            guard let self else { return }
-            self.current?.lyrics = text
-            if self.queue.indices.contains(self.index) { self.queue[self.index].lyrics = text }
-          })
-        }
+        self.fetchDefaultLyrics(lyricSong, token: token)
         self.status = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
           Task { @MainActor in
             guard let self, self.generation == token else { return }
@@ -256,6 +254,28 @@ enum PlaybackMode: String, CaseIterable {
       } catch { if self.generation == token { self.fail(error) } }
     }
   }
+  private func fetchDefaultLyrics(_ song: Song, token: UUID) {
+    guard lyricVersion == nil else { return }
+    lyricTask = Task { @MainActor [weak self] in
+      await SourceCatalog.applyLyrics(for: song, isCurrent: {
+        self?.generation == token && self?.lyricVersion == nil
+      }, apply: { text in
+        guard let self else { return }
+        self.current?.lyrics = text
+        self.queue[self.index].lyrics = text
+      })
+    }
+  }
+
+  func chooseLyrics(_ version: LyricVersion?, token: UUID) throws {
+    guard generation == token, let song = current else { throw CancellationError() }
+    try LyricSelection.save(version, to: LyricSelection.file(for: song))
+    lyricTask?.cancel()
+    lyricVersion = version
+    current?.lyrics = version?.text ?? queue[index].lyrics
+    if version == nil, let lyricsIdentity { fetchDefaultLyrics(lyricsIdentity, token: token) }
+  }
+
   private func startAudio() {
     do {
       let session = AVAudioSession.sharedInstance()
@@ -290,7 +310,7 @@ enum PlaybackMode: String, CaseIterable {
       duration = d
       nowPlaying()
     }
-    if t.isFinite { elapsed = max(0, t) }
+    if seekClock.acceptsSample, t.isFinite, elapsed != max(0, t) { elapsed = max(0, t) }
   }
   func toggle() { wantsAudio ? pause() : resume() }
   func pause() {
@@ -317,7 +337,14 @@ enum PlaybackMode: String, CaseIterable {
     finished = false
     elapsed = target
     let tolerance = preciseSeeking ? CMTime.zero : CMTime(seconds: 0.1, preferredTimescale: 600)
-    player.seek(to: time, toleranceBefore: tolerance, toleranceAfter: tolerance)
+    let request = seekClock.begin()
+    player.seek(to: time, toleranceBefore: tolerance, toleranceAfter: tolerance) { [weak self] _ in
+      Task { @MainActor in
+        guard let self, self.seekClock.finish(request) else { return }
+        self.tick()
+        self.nowPlaying()
+      }
+    }
     nowPlaying()
   }
   func next() {
@@ -357,6 +384,8 @@ enum PlaybackMode: String, CaseIterable {
     lyricTask?.cancel()
     artworkTask?.cancel()
     status = nil
+    seekClock = PlaybackSeekClock()
+    lyricVersion = nil
     current = nil
     queue = []
     index = 0
@@ -390,7 +419,9 @@ enum PlaybackMode: String, CaseIterable {
     sleepAfterTrack = true
   }
   func cacheCurrent() {
-    guard let song = current, song.requestedQuality == nil, let source, !source.isFileURL else { return }
+    guard var song = current, song.requestedQuality == nil, let source, !source.isFileURL else { return }
+    // Keep the library default distinct from the removable lyric override.
+    song.lyrics = queue[index].lyrics
     let key = PlaybackFiles.folder(song)
     if let url = PlaybackFiles.existing(song) {
       offline = true
@@ -415,7 +446,10 @@ enum PlaybackMode: String, CaseIterable {
         if self?.current.map(PlaybackFiles.folder) == key { self?.offline = true }
         self?.cached?(saved, url)
         if saved.lyrics?.isEmpty != false {
-          let currentLyrics = self?.current.flatMap { PlaybackFiles.folder($0) == key ? $0.lyrics : nil }
+          let currentLyrics = self.flatMap { p in
+            p.queue.indices.contains(p.index) && PlaybackFiles.folder(p.queue[p.index]) == key
+              ? p.queue[p.index].lyrics : nil
+          }
           let text: String?
           if let currentLyrics { text = currentLyrics } else { text = try? await SourceCatalog.lyrics(lyricLookup) }
           if let text, !text.isEmpty, FileManager.default.fileExists(atPath: url.path) {

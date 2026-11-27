@@ -141,7 +141,7 @@ actor ProviderSession {
         try await searchRows(info: ["keyword": keyword], platform: platform)
     }
 
-    private func searchRows(info: [String: String], platform: String) async throws -> [Song] {
+    func searchRows(info: [String: String], platform: String) async throws -> [Song] {
         guard searchPlatforms.contains(platform) else { throw SourceFailure("此平台未声明搜索能力") }
         let key = UUID().uuidString
         let response = try await wait(key, seconds: 4) {
@@ -177,8 +177,10 @@ actor ProviderSession {
     func requestURL(_ song: Song, quality: String) async throws -> URL {
         let source = Self.platform(song)
         let key = UUID().uuidString
-        let music = ["id": song.id, "songmid": song.id, "hash": song.id, "title": song.title, "name": song.title,
-                    "artist": song.artist, "singer": song.artist, "source": source]
+        var music = ["id": song.id, "songmid": song.id, "title": song.title, "name": song.title,
+                     "artist": song.artist, "singer": song.artist, "source": source]
+        if source == "kg" { music["hash"] = song.id }
+        if let ids = song.nativeIDs { music.merge(ids) { _, native in native } }
         let info: SourceJSON = ["musicInfo": music, "type": quality,
                                 "requestContext": ["requestKey": key, "requestType": "current"]]
         let response = try await wait(key, seconds: 5) {

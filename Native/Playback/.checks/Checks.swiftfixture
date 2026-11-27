@@ -1,0 +1,38 @@
+import Foundation
+
+@main enum Checks {
+  static func main() async throws {
+    let file = URL(fileURLWithPath: CommandLine.arguments[2])
+    let raw = "[offset:-150]\n[00:00:125][01:02.01]前<00:00.250>后\n[00:03.1]"
+    switch CommandLine.arguments[1] {
+    case "live":
+      let versions = try await LyricVersion.search(title: "Yellow", artist: "Coldplay")
+      precondition(versions.contains { $0.synced && !$0.text.isEmpty })
+      print("Live LRCLIB search returned \(versions.count) usable versions")
+    case "save":
+      let choice = LyricVersion(id: 1, trackName: "Test", artistName: "Test", albumName: nil, duration: nil, syncedLyrics: raw, plainLyrics: nil)
+      try LyricSelection.save(choice, to: file)
+    default:
+      let restored = LyricSelection.read(file)
+      precondition(restored?.id == 1 && restored?.text == raw)
+      let cues = PlaybackLyric.parse(restored?.text)
+      precondition(cues.map(\.time) == [0.275, 3.25, 62.16])
+      precondition(cues.map(\.text) == ["前后", "", "前后"])
+      for (t, id): (Double, Int?) in [(0, nil), (0.275, 0), (3.249, 0), (3.25, 1), (64, 2), (1, 0)] {
+        precondition(PlaybackLyric.active(at: t, in: cues) == id)
+      }
+      let plain = PlaybackLyric.parse("untimed\nsecond")
+      precondition(plain.count == 2 && PlaybackLyric.active(at: 100, in: plain) == nil)
+      var clock = PlaybackSeekClock()
+      let first = clock.begin(), second = clock.begin()
+      precondition(!clock.finish(first) && !clock.acceptsSample)
+      precondition(clock.finish(second) && clock.acceptsSample)
+      let stale = clock.begin()
+      clock = PlaybackSeekClock()
+      precondition(!clock.finish(stale) && clock.acceptsSample)
+      try LyricSelection.save(nil, to: file)
+      precondition(LyricSelection.read(file) == nil)
+      print("Offline second-process restore, reset, timing boundaries and seek ordering passed")
+    }
+  }
+}

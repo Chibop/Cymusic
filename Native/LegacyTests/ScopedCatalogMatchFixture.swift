@@ -23,6 +23,12 @@ private final class CatalogFixture: URLProtocol {
         case "music.163.com":
             precondition(query.contains(URLQueryItem(name: "s", value: "Song Artist")))
             json = #"{"result":{"songs":[{"id":456,"name":"Song","artists":[{"name":"Artist"}],"duration":123000}]}}"#
+        case "songsearch.kugou.com":
+            json = #"{"status":1,"data":{"lists":[{"FileHash":"B5FB24746AF437BE697BFDBC7BA997E7","ID":"410","AlbumID":"976460","SongName":"Song","SingerName":"Artist","Duration":123}]}}"#
+        case "search.kuwo.cn":
+            json = #"{"abslist":[{"MUSICRID":"MUSIC_440613","SONGNAME":"Song","ARTIST":"Artist","DURATION":"123"}]}"#
+        case "c.musicapp.migu.cn":
+            json = #"{"code":"000000","songResultData":{"result":[{"id":"697066","contentId":"600902000006889010","copyrightId":"60054702010","name":"Song","singers":[{"name":"Artist"}],"albums":[{"name":"Studio"}]}]}}"#
         default: fatalError("Unexpected network call: \(url)")
         }
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
@@ -56,21 +62,46 @@ private final class CatalogFixture: URLProtocol {
         try await engine.importScript(source, name: "Selected")
         let selected = engine.scripts[1]
         let seed = Song(id: "apple-id", title: "Song", artist: "Artist", platform: "apple", album: "Studio", duration: 123)
-        for (site, id, levels) in [("tx", "qq-mid", ["128k"]), ("wy", "456", ["320k"]), ("kg", "kg-id", ["flac24bit", "128k"])] {
+        for (site, id, levels) in [("tx", "qq-mid", ["128k"]), ("wy", "456", ["320k"]), ("kg", "kg-id", ["flac24bit", "128k"]), ("mg", "697066", ["128k"])] {
             let matched = try await engine.matchCatalogSong(seed, script: selected, platform: site)
             precondition(matched.id == id && matched.platform == site && matched.searchScriptID == selected.id)
+            if site == "mg" { precondition(matched.nativeIDs?["contentId"] == "600902000006889010" && matched.nativeIDs?["copyrightId"] == "60054702010") }
             let actual = try await engine.availableLevels(for: matched, script: selected)
             precondition(actual == levels)
             do { _ = try await engine.availableLevels(for: matched, script: engine.scripts[0]); fatalError("Accepted wrong script") }
             catch is SourceFailure {}
         }
-        for (site, title) in [("mg", "Song"), ("kw", "Song"), ("kg", "Live only"), ("kg", "Ambiguous"), ("kg", "Apple ID")] {
+        for (site, title) in [("kw", "Song"), ("kg", "Live only"), ("kg", "Ambiguous"), ("kg", "Apple ID")] {
             var input = seed
             input.title = title
             do { _ = try await engine.matchCatalogSong(input, script: selected, platform: site); fatalError("Accepted \(site) / \(title)") }
             catch is SourceFailure {}
         }
-        precondition(CatalogFixture.trace == ["c.y.qq.com", "music.163.com"])
+        precondition(CatalogFixture.trace == ["c.y.qq.com", "music.163.com", "c.musicapp.migu.cn"])
+        let resolver = """
+        lx.on(lx.EVENT_NAMES.request, async ({source,action,info}) => {
+          const m = info.musicInfo;
+          if (action !== 'musicUrl' || info.type !== '128k') throw Error('wrong action');
+          if (source === 'mg' && (m.contentId !== '600902000006889010' || m.copyrightId !== '60054702010' || m.id !== '697066')) throw Error('wrong MG IDs');
+          if (source === 'kw' && (m.songmid !== '440613' || m.musicRid !== 'MUSIC_440613')) throw Error('wrong KW IDs');
+          if (source === 'kg' && (m.hash !== 'B5FB24746AF437BE697BFDBC7BA997E7' || m.albumId !== '976460')) throw Error('wrong KG IDs');
+          return 'https://example.invalid/'+source;
+        });
+        const cap = {type:'music',actions:['musicUrl'],qualitys:['128k']};
+        lx.send(lx.EVENT_NAMES.inited,{sources:{kw:cap,kg:cap,mg:cap,local:cap}});
+        """
+        try await engine.importScript(resolver, name: "Resolver only")
+        let pinned = engine.scripts.last!
+        for site in ["kw", "kg", "mg"] {
+            var song = try await engine.matchCatalogSong(seed, script: pinned, platform: site)
+            song.requestedQuality = "128k"
+            _ = try await engine.downloadMedia(song) { url in
+                precondition(url.absoluteString == "https://example.invalid/" + site)
+                return url
+            }
+        }
+        do { _ = try await engine.matchCatalogSong(seed, script: pinned, platform: "local"); fatalError("Unsupported route") }
+        catch let error as SourceFailure { precondition(error.errorDescription?.contains("不支持") == true) }
         print("Scoped catalog matching and declared quality levels passed")
     }
 }

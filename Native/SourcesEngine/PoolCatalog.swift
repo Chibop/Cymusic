@@ -233,6 +233,60 @@ enum PoolCatalog {
     }
     #endif
 
+    // Public search metadata only; identifier keys preserve each provider's
+    // actual script-facing native contract.
+    static func migu(_ term: String) async throws -> [Song] {
+        let data = try await fetch("https://c.musicapp.migu.cn/v1.0/content/search_all.do", [
+            "text": term, "pageNo": "1", "pageSize": "30", "searchSwitch": "{\"song\":1}"
+        ])
+        guard let root = try JSONSerialization.jsonObject(with: data) as? SourceJSON,
+              root["code"] as? String == "000000", let resultData = root["songResultData"] as? SourceJSON,
+              let rows = resultData["result"] as? [SourceJSON] else { throw URLError(.cannotParseResponse) }
+        return rows.compactMap { row in
+            guard let id = row["id"] as? String, let content = row["contentId"] as? String,
+                  let copyright = row["copyrightId"] as? String, let title = row["name"] as? String,
+                  let artists = row["singers"] as? [SourceJSON] else { return nil }
+            let artist = artists.compactMap { $0["name"] as? String }.joined(separator: " / ")
+            guard !artist.isEmpty else { return nil }
+            let album = (row["albums"] as? [SourceJSON])?.compactMap { $0["name"] as? String }.first
+            var song = Song(id: id, title: title, artist: artist, platform: "mg", album: album)
+            song.nativeIDs = ["id": id, "songmid": id, "contentId": content, "copyrightId": copyright]
+            return song
+        }
+    }
+
+    static func kugou(_ term: String) async throws -> [Song] {
+        let bytes = try await fetch("https://songsearch.kugou.com/song_search_v2", ["keyword": term, "pagesize": "30", "page": "1"])
+        guard let root = try JSONSerialization.jsonObject(with: bytes) as? SourceJSON,
+              root["status"] as? Int == 1, let page = root["data"] as? SourceJSON,
+              let rows = page["lists"] as? [SourceJSON] else { throw URLError(.cannotParseResponse) }
+        return rows.compactMap { row in
+            guard let hash = row["FileHash"] as? String, hash.range(of: #"^[0-9a-fA-F]{32}$"#, options: .regularExpression) != nil,
+                  let title = row["SongName"] as? String, let artist = row["SingerName"] as? String else { return nil }
+            var ids = ["hash": hash]
+            for (field, name) in [("ID", "songmid"), ("AlbumID", "albumId"), ("HQFileHash", "320hash"), ("SQFileHash", "sqhash")] {
+                if let value = row[field] as? String, !value.isEmpty { ids[name] = value }
+            }
+            return Song(id: hash, title: title, artist: artist, platform: "kg", nativeIDs: ids,
+                        album: row["AlbumName"] as? String, duration: (row["Duration"] as? NSNumber)?.doubleValue)
+        }
+    }
+
+    static func kuwo(_ term: String) async throws -> [Song] {
+        let data = try await fetch("https://search.kuwo.cn/r.s", ["all": term, "ft": "music", "itemset": "web_2013", "client": "kt", "pn": "0", "rn": "30", "rformat": "json", "encoding": "utf8", "mobi": "1"])
+        guard let root = try JSONSerialization.jsonObject(with: data) as? SourceJSON,
+              let rows = root["abslist"] as? [SourceJSON] else { throw URLError(.cannotParseResponse) }
+        return rows.compactMap { row in
+            guard let rid = row["MUSICRID"] as? String, let title = row["SONGNAME"] as? String,
+                  let artist = row["ARTIST"] as? String else { return nil }
+            let seconds = Double(row["DURATION"] as? String ?? "")
+            guard rid.hasPrefix("MUSIC_"), let numeric = Int64(rid.dropFirst(6)), numeric > 0 else { return nil }
+            var song = Song(id: String(rid.dropFirst(6)), title: title, artist: artist, platform: "kw", album: row["ALBUM"] as? String, duration: seconds)
+            song.nativeIDs = ["musicRid": rid, "songmid": song.id]
+            return song
+        }
+    }
+
     static func qq(_ term: String) async throws -> [Song] {
         let data = try await fetch("https://c.y.qq.com/soso/fcgi-bin/client_search_cp", ["w": term, "format": "json", "n": "30", "p": "1"], referer: "https://y.qq.com/")
         let root = try JSONSerialization.jsonObject(with: data) as? SourceJSON

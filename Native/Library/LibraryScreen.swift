@@ -65,9 +65,13 @@ struct LibraryScreen: View {
   @State private var songFlow = false
   @State private var detail: ShelfAlbum?
   @State private var collections = false
-  @State private var pickingFiles = false
+  @State private var showingTracks = false
+  @State private var showingPlaylists = false
+  @State private var namingPlaylist = false
+  @State private var playlistName = ""
+  private var hasLocalQueue: Bool { !playback.queue.isEmpty && playback.current?.url?.isFileURL == true }
   private var inQueue: Bool {
-    songFlow && !playback.queue.isEmpty && playback.current?.url?.isFileURL == true
+    songFlow && hasLocalQueue
   }
   private var album: ShelfAlbum? { albums.indices.contains(selected) ? albums[selected] : nil }
   private var count: Int { inQueue ? playback.queue.count : albums.count }
@@ -84,11 +88,14 @@ struct LibraryScreen: View {
       playback.toggle()
     } else if let album {
       detail = album
-    } else {
-      pickingFiles = true
     }
   }
-  private func menu() { if inQueue { songFlow = false } else { collections = true } }
+  private func menu() { showingPlaylists = false; collections.toggle() }
+  private func openTracks(_ scope: ShelfCollection) {
+    collection = scope
+    collections = false
+    showingTracks = true
+  }
   private func shuffle() {
     let songs = collection.tracks(in: library).shuffled()
     guard !songs.isEmpty else { return }
@@ -122,6 +129,7 @@ struct LibraryScreen: View {
           .background(LinearGradient(colors: [Color(white: 0.95), Color(white: 0.82), Color(white: 0.93)],
                                      startPoint: .topLeading, endPoint: .bottomTrailing))
         }
+
       }
       .onGeometryChange(for: Bool.self) { proxy in
         proxy.size.width > proxy.size.height * 1.35
@@ -136,12 +144,8 @@ struct LibraryScreen: View {
     .navigationTitle("Library").navigationBarTitleDisplayMode(.inline)
     .toolbar {
       ToolbarItem(placement: .navigationBarLeading) {
-        Button {
-          pickingFiles = true
-        } label: {
-          Image(systemName: "square.and.arrow.down")
-        }.accessibilityLabel("Import audio files").accessibilityIdentifier("library.import")
-          .disabled(library.importing)
+        Button(action: menu) { Image(systemName: "line.3.horizontal") }
+          .accessibilityLabel("资料库菜单").accessibilityIdentifier("library.toolbarMenu")
       }
       ToolbarItem(placement: .navigationBarTrailing) {
         Button(action: shuffle) { Label("随机播放", systemImage: "shuffle") }.disabled(albums.isEmpty)
@@ -165,26 +169,21 @@ struct LibraryScreen: View {
         }
       }.presentationDragIndicator(.visible)
     }
-    .sheet(isPresented: $collections) {
+    .sheet(isPresented: $showingTracks) {
       NavigationStack {
-        CollectionsView(selection: $collection) { tracks, i in
+        CollectionTracksView(selection: collection) { tracks, i in
           playback.play(tracks, index: i)
           songFlow = true
-          collections = false
+          showingTracks = false
         }
       }.presentationDragIndicator(.visible)
     }
-    .fileImporter(
-      isPresented: $pickingFiles, allowedContentTypes: [.audio], allowsMultipleSelection: true
-    ) { result in
-      switch result {
-      case .success(let urls): Task { await library.importFiles(urls) }
-      case .failure(let error):
-        if (error as? CocoaError)?.code != .userCancelled {
-          library.message = L10n.message(for: error)
-        }
-      }
+    .alert("新建歌单", isPresented: $namingPlaylist) {
+      TextField("歌单名称", text: $playlistName)
+      Button("创建") { library.createPlaylist(playlistName) }
+      Button("取消", role: .cancel) {}
     }
+
     .alert(
       "Library",
       isPresented: Binding(
@@ -195,6 +194,69 @@ struct LibraryScreen: View {
       Text(library.message ?? "")
     }
   }
+  private var collectionOverlay: some View {
+    ZStack(alignment: .leading) {
+      Color.black.opacity(0.18).onTapGesture { collections = false }
+      VStack(alignment: .leading, spacing: 0) {
+        HStack {
+          Text(showingPlaylists ? "歌单列表" : "资料库").font(.headline)
+          Spacer()
+          Button { collections = false } label: { Image(systemName: "xmark.circle.fill").font(.title2) }
+            .accessibilityLabel("关闭菜单")
+        }.padding(.bottom, 12)
+        if showingPlaylists {
+          Button { showingPlaylists = false } label: { Label("返回", systemImage: "chevron.left") }
+            .padding(.bottom, 8)
+          List {
+              ForEach(library.playlists) { item in
+                Button {
+                  openTracks(.playlist(item.id))
+                } label: {
+                  HStack { Label(item.name, systemImage: "music.note.list"); Spacer(); if collection == .playlist(item.id) { Image(systemName: "checkmark") } }
+                    .padding(.vertical, 12).contentShape(Rectangle())
+                }.buttonStyle(.plain).swipeActions {
+                  Button("删除", role: .destructive) {
+                    if collection == .playlist(item.id) { collection = .all }
+                    library.deletePlaylist(item.id)
+                  }
+                }
+                .listRowBackground(Color.clear)
+              }
+              Button { playlistName = ""; namingPlaylist = true } label: {
+                Label("新建歌单", systemImage: "plus").padding(.vertical, 12)
+              }.frame(maxWidth: .infinity, alignment: .leading)
+          }.listStyle(.plain).scrollContentBackground(.hidden)
+        } else {
+          ScrollView {
+            VStack(spacing: 0) {
+          menuRow("我喜欢的", icon: "heart") { openTracks(.favorites) }
+          menuRow("专辑列表", icon: "square.stack") { collection = .all; songFlow = false; collections = false }
+          menuRow("全部歌曲", icon: "music.note.list") { openTracks(.all) }
+          menuRow("歌单列表", icon: "text.badge.list.bullet") { showingPlaylists = true }
+          if hasLocalQueue && !inQueue {
+            menuRow("返回播放队列", icon: "play.circle") { songFlow = true; collections = false }
+          }
+            }
+          }
+        }
+      }
+      .padding(12).frame(maxWidth: 252, alignment: .leading)
+      .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22))
+      .overlay(RoundedRectangle(cornerRadius: 22).stroke(.white.opacity(0.45), lineWidth: 1))
+      .shadow(color: .black.opacity(0.22), radius: 24, y: 12)
+      .foregroundStyle(.primary).padding(8)
+    }.transition(.opacity.combined(with: .scale(scale: 0.97)))
+      .zIndex(20)
+
+  }
+
+  private func menuRow(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+      HStack { Label(title, systemImage: icon); Spacer(); if (title == "全部歌曲" && collection == .all) || (title == "我喜欢的" && collection == .favorites) { Image(systemName: "checkmark") } }
+        .padding(.vertical, 13).contentShape(Rectangle())
+    }.buttonStyle(.plain).overlay(alignment: .bottom) { Divider() }
+  }
+
   private func refreshShelf() {
     let oldID = album?.id
     albums = ShelfAlbum.collect(library, songs: collection.tracks(in: library))
@@ -273,12 +335,13 @@ struct LibraryScreen: View {
         Spacer()
         Image(systemName: "music.note.list").font(.largeTitle)
         Text("No songs yet").font(.headline).padding(.top, 5)
-        Button("Import audio files") { pickingFiles = true }.font(.subheadline).padding(8)
+        Text("可在设置中导入歌曲").font(.subheadline).padding(8)
         Spacer()
       }
     }.foregroundStyle(.white).frame(width: max(1, width - 12), height: max(1, height - 12)).background(
       CoverFlowBackdrop(art: art, title: title ?? "")
-    ).clipShape(RoundedRectangle(cornerRadius: 5)).padding(6)
+    ).overlay(alignment: .leading) { if collections { collectionOverlay } }
+      .clipShape(RoundedRectangle(cornerRadius: 5)).padding(6)
       .background(RoundedRectangle(cornerRadius: 10).fill(Color(white: 0.14))).overlay(
         RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(0.7), lineWidth: 1))
   }
@@ -704,63 +767,29 @@ private struct CacheRemoval: ViewModifier {
   }
 }
 
-private struct CollectionsView: View {
+private struct CollectionTracksView: View {
   @EnvironmentObject var library: Library
   @Environment(\.dismiss) var dismiss
-  @Binding var selection: ShelfCollection
+  let selection: ShelfCollection
   let play: ([Song], Int) -> Void
-  @State private var namingPlaylist = false
-  @State private var name = ""
   @State private var removing: Song?
   var body: some View {
     List {
-      row(.favorites, icon: "heart")
-      row(.all, icon: "music.note.list")
-      Section("Playlists") {
-        ForEach(library.playlists) { item in
-          row(.playlist(item.id), icon: "music.note.list").swipeActions {
-            Button("Delete", role: .destructive) {
-              if selection == .playlist(item.id) { selection = .all }
-              library.deletePlaylist(item.id)
-            }
-          }
-        }
-        Button {
-          name = ""
-          namingPlaylist = true
-        } label: {
-          Label("New playlist", systemImage: "plus")
-        }
-      }
-      Section(selection.title(in: library)) {
-        LibraryTracks(
-          queue: selection.tracks(in: library), playlist: playlistID, play: play,
+      let tracks = selection.tracks(in: library)
+
+      LibraryTracks(
+          queue: tracks, playlist: playlistID, play: play,
           removing: $removing)
-      }
-    }.navigationTitle("Library").toolbar {
+    }.navigationTitle(selection.title(in: library)).toolbar {
       ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } }
     }.modifier(CacheRemoval(song: $removing))
-      .alert("New playlist", isPresented: $namingPlaylist) {
-        TextField("Playlist name", text: $name)
-        Button("Create") { library.createPlaylist(name) }
-        Button("Cancel", role: .cancel) {}
-      }
+
   }
   private var playlistID: UUID? {
     if case .playlist(let id) = selection { return id }
     return nil
   }
-  private func row(_ item: ShelfCollection, icon: String) -> some View {
-    Button {
-      selection = item
-    } label: {
-      HStack {
-        Label(item.title(in: library), systemImage: icon)
-        Spacer()
-        if selection == item { Image(systemName: "checkmark").accessibilityHidden(true) }
-      }
-    }.accessibilityAddTraits(selection == item ? .isSelected : [])
-  }
+
 }
 
 private struct LibraryTracks: View {
@@ -772,7 +801,7 @@ private struct LibraryTracks: View {
   @Binding var removing: Song?
 
   var body: some View {
-    if queue.isEmpty { Text("No songs yet").foregroundStyle(.secondary) }
+    if queue.isEmpty { Text("暂无歌曲").foregroundStyle(.secondary) }
     ForEach(Array(queue.enumerated()), id: \.element.id) { index, song in
       HStack {
         Button {

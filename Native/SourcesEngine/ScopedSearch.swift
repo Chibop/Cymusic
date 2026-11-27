@@ -65,18 +65,27 @@ extension SourceEngine {
         let candidates = try await withScopedSession(script) { session -> [Song] in
             let actions = await session.routes[platform] ?? []
             guard actions.contains("musicUrl") else { throw SourceFailure("音源未声明所选平台的下载能力") }
+            // Resolver-only scripts use the site’s public metadata catalog.
+            if actions.contains("search") {
+                return try await session.searchRows(info: ["keyword": query, "title": seed.title, "artist": seed.artist], platform: platform)
+            }
             switch platform {
             case "tx": return try await PoolCatalog.qq(query)
             case "wy": return try await PoolCatalog.netEase(query)
+            case "mg": return try await PoolCatalog.migu(seed.title)
+            case "kw": return try await PoolCatalog.kuwo(query)
+            case "kg": return try await PoolCatalog.kugou(query)
             default:
-                guard actions.contains("search") else { throw SourceFailure("所选平台不支持歌曲匹配") }
-                return try await session.search(seed, platform: platform)
+                throw SourceFailure("此站点不支持目录搜索")
             }
         }
         try Task.checkCancellation()
         _ = try installed(script)
         let scoped = candidates.filter { $0.platform == platform && $0.id != seed.id }
-        guard var match = PoolMatcher.match(seed, in: scoped) else { throw SourceFailure("所选平台未找到同一录音版本") }
+        guard var match = PoolMatcher.match(seed, in: scoped) else {
+            let plausible = scoped.filter { PoolMatcher.match(seed, in: [$0]) != nil }
+            throw SourceFailure(Set(plausible.map(\.id)).count > 1 ? "有多个相符的录音，无法确定版本" : "未找到同一录音版本")
+        }
         match.searchScriptID = script.id
         return match
     }
